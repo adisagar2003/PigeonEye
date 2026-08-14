@@ -56,6 +56,82 @@ The old stage numbers survive where they are load-bearing: `coding-standards.md`
 | **The seal misread reproduces** | `WEAL PROTECTED` at conf **0.08** on `007969-00242-...-01.jpg`, matching the 0.062 recorded below. The low end of Vision's confidence is trustworthy. |
 | **The CLI contract survived the move** | `spikes/page_index.py` still reports 45 pages, a 1,426-token index at 32/page against 32,394 tokens of full text — identical to the numbers below. |
 
+### Dry run over all of `assets/` — OCR loses the rate tables
+
+Every document read through the shipping path (150 dpi render → Vision): 9 PDFs
+/ 161 pages, plus the 18 scans. The scans reproduce the numbers below exactly
+(1092 lines, min 0.05, p05 0.34, median 0.61), so the pipeline is unchanged by
+the F1 move.
+
+**Accuracy against `pdftotext`, median per page.** All 161 pages carry a text
+layer, so ground truth is free. CER is order-sensitive and misleading here —
+BER is the honest column, as it was for forms.
+
+| Document | pages | CER | NSCER | BER | **numeric recall** |
+|---|---|---|---|---|---|
+| `000524-00529` Roundup PRO | 45 | 0.116 | 0.010 | 0.037 | **73.8%** |
+| `000524-00549` | 13 | 0.148 | 0.043 | 0.117 | 87.6% |
+| `007969-00186` | 40 | 0.622 | 0.338 | 0.177 | 88.4% |
+| `007969-00242` | 12 | 0.539 | 0.414 | 0.095 | 92.5% |
+| `035915-00004` | 29 | 0.101 | 0.026 | 0.079 | 98.4% |
+| `066330-00424` | 22 | 0.487 | 0.298 | 0.094 | 94.8% |
+| IRS 4835 | 3 | 0.998 | 0.976 | 0.045 | 95.3% |
+| IRS Schedule F | 2 | 0.650 | 0.364 | 0.376 | 90.8% |
+| NRCS CPA-1200 | 3 | 0.530 | 0.223 | 0.349 | 100.0% |
+
+**Numeric recall** — what fraction of the numeric tokens in the file survive
+OCR — is the column that matters, because a lost application rate is the
+failure this product exists to prevent. The most-often-lost tokens across the
+corpus are `1.6` (110×), `0.8` (52×), `2.4` (27×), `3.2` (22×): rates, not page
+furniture.
+
+**Where the 26% goes.** Three pages of the flagship label, all rate tables:
+
+| Page | numbers in file | survive OCR | lines | conf < 0.45 | Vision "tables" |
+|---|---|---|---|---|---|
+| 22 | 25 | 14 | 56 | 10 | 0 |
+| 32 | 111 | 34 | 80 | 32 | 1 |
+| **34** | **186** | **1** | 55 | 25 | 1 |
+
+Page 34 is the woody-brush rate table. The file says
+`Hornbeam, American* | 1.6-4 | 0.8-1.6`; OCR returns `Hornbeam, American*` and
+nothing else. The only number that survives the page is the page number.
+
+Four things this is **not**:
+
+1. **Not the table API.** Vision detects the table — 55 rows × 3 columns — and
+   returns empty strings for columns 2 and 3. `doc.tables` recovers nothing
+   that `doc.text` missed.
+2. **Not the pixels.** OCR the right-hand 45% of the same 150 dpi render alone
+   and 27 digits come back. Whole-page layout analysis is what drops them.
+3. **Not fixable with DPI.** Digits found on page 34 at 150/220/300/400 dpi:
+   **2 / 82 / 39 / 2** — non-monotonic. At 220 dpi the rates read correctly
+   (`0.8-1.6`, `0.8-1.2`, conf 0.49–0.56) and the label's recall rises to
+   78.1%, but NRCS falls 100% → 94.6% and two others also drop. There is no
+   single good number.
+4. **Not caught by the confidence gate as designed.** Page 34 *is* flagged — 25
+   of 55 lines sit below 0.45 — so F5 would escalate. But the lost column has
+   no region to crop, because a line Vision never emitted has no bbox and no
+   confidence. **The gate escalates what was read badly, never what was not
+   read at all.**
+
+**One free signal, though:** a Vision table with wholly empty columns is a
+self-declared failure, detectable without a model. That is the cheapest
+available trigger for a page-level escalation, and it belongs in F3/F5.
+
+**What it means for "OCR every page, always".** The decision was taken
+knowingly, on the grounds that OCR error would be caught by the confidence
+gate. On rate tables it is not caught — it is an absence, and absence has no
+confidence. Meanwhile every one of these 161 pages carries a text layer that
+gives 100% numeric recall for free. The decision is worth re-opening for
+*values*, keeping OCR for geometry and confidence.
+
+**Also found:** `./ocr` segfaults intermittently under concurrent Vision
+requests — 2 crashes in ~40 runs, not reproducible on demand. The CLI fans out
+one request per argument with no bound; `Agent.read` bounds at
+`Limits.concurrentPages` (6) and has not crashed across many test runs. The
+one-line mitigation is to give the CLI the same bound.
+
 ### OCR — Apple Vision is the local tier
 
 `doc.text.lines[]` gives text, `confidence`, `boundingRegion`, corner points,
