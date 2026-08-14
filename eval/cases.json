@@ -1,0 +1,63 @@
+{
+  "_readme": [
+    "Ground truth for comparing candidate reasoning models (Apple Foundation",
+    "Models vs mere.run vs OpenAI). Every value here was read off the real OCR",
+    "output of the named scan - nothing is invented. Verify against:",
+    "  ./ocr assets/scans/<scan>.jpg",
+    "",
+    "The two cases are deliberately opposed: 000524 requires NOTHING of the",
+    "recipient, 007969 carries a real obligation plus a relative deadline. A",
+    "model that invents obligations fails the first; one that misses them fails",
+    "the second. Scoring both prevents tuning to one shape."
+  ],
+
+  "epa-524-529": {
+    "scan": "assets/scans/000524-00529-20241120-01.jpg",
+    "notes": "Notification acknowledgement. EPA is confirming receipt. Nothing is required.",
+    "expect": {
+      "doc_type_keywords": ["notification", "label", "acknowledg", "receipt"],
+      "reference_numbers": ["524-529", "00627478"],
+      "letter_date": ["November 20, 2024", "2024-11-20"],
+      "product": ["ROUNDUP PRO CONCENTRATE"],
+      "contact": ["golembiewski.margaret@epa.gov"],
+      "action_required": false,
+      "deadline": null
+    },
+    "traps": {
+      "invented_obligation": {
+        "why": "There is no deadline and nothing to submit. A model that manufactures one is unsafe for this product.",
+        "fail_if_output_contains": ["you must submit", "deadline", "by no later than", "failure to comply"]
+      },
+      "receipt_date_as_letter_date": {
+        "why": "'EPA Receipt Date: 08/30/2024' is not the date of the letter.",
+        "fail_if_output_contains": ["08/30/2024 letter", "dated August 30"]
+      }
+    }
+  },
+
+  "epa-7969-242": {
+    "scan": "assets/scans/007969-00242-20170111-01.jpg",
+    "notes": "Label amendment approval. Carries an obligation AND an 18-month relative deadline.",
+    "expect": {
+      "doc_type_keywords": ["label amendment", "approval", "accepted"],
+      "reference_numbers": ["7969-242", "510624"],
+      "letter_date": ["January 11, 2017", "2017-01-11"],
+      "product": ["Status Herbicide"],
+      "recipient": ["Jeff Birk", "BASF"],
+      "action_required": true,
+      "action_keywords": ["submit", "final printed labeling", "before you release"],
+      "deadline_basis_keywords": ["18 month", "date of this letter"],
+      "deadline_derived": ["2018-07-11", "July 2018", "July 11, 2018"]
+    },
+    "traps": {
+      "wrong_deadline_anchor": {
+        "why": "The 18 months runs from the LETTER date (2017-01-11), not the Application Date (2015-10-22). Anchoring to the wrong date is the single most dangerous error on this page.",
+        "fail_if_output_contains": ["2017-04-22", "April 2017", "from October 22", "2015-10-22 plus"]
+      },
+      "silent_arithmetic": {
+        "why": "Deriving a date is fine; deriving it WITHOUT saying it was derived is not. It must be marked as computed, not quoted.",
+        "require_one_of": ["18 month", "from the date of this letter", "calculated", "derived", "approximately"]
+      }
+    }
+  }
+}

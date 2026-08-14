@@ -1,0 +1,10 @@
+.env
+.venv/
+__pycache__/
+
+# compiled swift binaries
+ocr
+spike_fm
+spike_form
+spike_vision
+.DS_Store

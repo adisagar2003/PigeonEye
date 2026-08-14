@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field Log</title>
+<style>
+  :root {
+    --bg:#12140f; --panel:#1b1e17; --line:#2f3427; --ink:#e8eade;
+    --dim:#98a08a; --ok:#8fc46a; --warn:#e0b341; --bad:#e0705a; --accent:#8fc46a;
+  }
+  * { box-sizing:border-box }
+  body {
+    margin:0; background:var(--bg); color:var(--ink);
+    font:16px/1.55 ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;
+  }
+  header {
+    padding:18px 24px; border-bottom:1px solid var(--line);
+    display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
+  }
+  h1 { margin:0; font-size:20px; letter-spacing:.02em }
+  .tag { color:var(--dim); font-size:14px }
+  #step {
+    margin-left:auto; font-variant-numeric:tabular-nums; font-size:14px;
+    color:var(--accent); border:1px solid var(--line); border-radius:99px; padding:4px 12px;
+  }
+  main { max-width:1100px; margin:0 auto; padding:24px; display:grid; gap:20px }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:18px }
+  h2 { margin:0 0 12px; font-size:13px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim) }
+  textarea {
+    width:100%; min-height:120px; background:#0d0f0a; color:var(--ink);
+    border:1px solid var(--line); border-radius:8px; padding:12px; font:inherit; resize:vertical;
+  }
+  button {
+    background:var(--accent); color:#12140f; border:0; border-radius:8px;
+    padding:10px 18px; font:inherit; font-weight:600; cursor:pointer;
+  }
+  button:disabled { opacity:.5; cursor:default }
+  button.ghost { background:transparent; color:var(--dim); border:1px solid var(--line); font-weight:400 }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:12px }
+  table { width:100%; border-collapse:collapse; font-size:15px }
+  th { text-align:left; color:var(--dim); font-weight:500; padding:6px 10px 6px 0; width:130px; vertical-align:top }
+  td { padding:6px 0; vertical-align:top }
+  .src { color:var(--dim); font-size:13px; font-style:italic }
+  .badge { font-size:11px; padding:2px 7px; border-radius:99px; margin-left:8px; vertical-align:middle }
+  .b-guess { background:rgba(224,179,65,.15); color:var(--warn); border:1px solid rgba(224,179,65,.4) }
+  .b-miss  { background:rgba(224,112,90,.15); color:var(--bad);  border:1px solid rgba(224,112,90,.4) }
+  .miss td { color:var(--bad) }
+  #question { border-color:var(--warn) }
+  #question h2 { color:var(--warn) }
+  .q { font-size:19px; margin:0 0 14px }
+  input[type=text] {
+    flex:1; min-width:240px; background:#0d0f0a; color:var(--ink);
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; font:inherit;
+  }
+  .stop { border-color:var(--bad) } .stop h2 { color:var(--bad) }
+  pre { margin:0; overflow-x:auto; background:#0d0f0a; border:1px solid var(--line);
+        border-radius:8px; padding:12px; font-size:14px }
+  .hidden { display:none }
+  .err { color:var(--bad) }
+</style>
+</head>
+<body>
+<header>
+  <h1>Field Log</h1>
+  <span class="tag">voice note in &rarr; compliance record out</span>
+  <span id="step">step 0/6</span>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Field note</h2>
+    <textarea id="note" placeholder="Talk like you would at the headland&hellip;"></textarea>
+    <div class="row">
+      <button id="run">Process note</button>
+      <button class="ghost" data-s="0">clean note</button>
+      <button class="ghost" data-s="1">rambling note</button>
+      <button class="ghost" data-s="2">wrong domain</button>
+    </div>
+    <p id="err" class="err hidden"></p>
+  </section>
+
+  <section id="question" class="panel hidden">
+    <h2>Agent needs one thing</h2>
+    <p class="q" id="qtext"></p>
+    <div class="row">
+      <input type="text" id="ans" placeholder="Answer&hellip;">
+      <button id="send">Answer</button>
+    </div>
+  </section>
+
+  <section id="stop" class="panel stop hidden">
+    <h2>Stopped</h2>
+    <p id="stoptext"></p>
+  </section>
+
+  <section id="out" class="panel hidden">
+    <h2>Extracted record</h2>
+    <table id="rec"></table>
+  </section>
+
+  <section id="csvbox" class="panel hidden">
+    <h2>Log</h2>
+    <pre id="csv"></pre>
+  </section>
+</main>
+
+<script>
+const SAMPLES = [
+  "August 14th, sprayed the north forty with Roundup at two litres a hectare. Light wind, dry. Aditya was driving.",
+  "Yeah so this morning, uh, I got out to the north one — not the big one, the other one — and put the nitrogen down. Wind picked up around ten so I quit early. Tractor's making that noise again.",
+  "Reminder to call the vet about the heifer and pick up feed on the way home."
+];
+const FIELDS = ["date","field_name","operation","product","rate","weather","operator"];
+const LABEL = f => f.replace(/_/g," ");
+
+let note = "", answers = {}, round = 0;
+const $ = id => document.getElementById(id);
+const show = (el, on) => el.classList.toggle("hidden", !on);
+
+document.querySelectorAll("[data-s]").forEach(b =>
+  b.onclick = () => { $("note").value = SAMPLES[+b.dataset.s]; });
+
+$("run").onclick = () => {
+  note = $("note").value.trim();
+  if (!note) { fail("Type or pick a note first."); return; }
+  answers = {}; round = 0;
+  [$("question"), $("stop"), $("out"), $("csvbox")].forEach(e => show(e, false));
+  step();
+};
+
+$("send").onclick = () => {
+  const v = $("ans").value.trim();
+  if (!v) return;
+  answers[$("send").dataset.field] = v;
+  $("ans").value = "";
+  round += 1;
+  step();
+};
+$("ans").addEventListener("keydown", e => { if (e.key === "Enter") $("send").click(); });
+
+function fail(msg) { $("err").textContent = msg; show($("err"), true); }
+
+async function step() {
+  show($("err"), false);
+  $("run").disabled = $("send").disabled = true;
+  $("step").textContent = "thinking…";
+  try {
+    const r = await fetch("/api/step", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ note, answers, round })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    render(d);
+  } catch (e) {
+    fail(e.message);
+    $("step").textContent = "step —/6";
+  } finally {
+    $("run").disabled = $("send").disabled = false;
+  }
+}
+
+function render(d) {
+  $("step").textContent = `step ${d.step}/${d.max_steps}`;
+
+  if (d.refused) {
+    show($("question"), false); show($("out"), false);
+    $("stoptext").textContent = d.reason;
+    show($("stop"), true);
+    return;
+  }
+
+  const srcOf = {};
+  (d.sources || []).forEach(s => srcOf[s.name] = s.phrase);
+  const guessed = new Set(d.guessed || []);
+  const missing = new Set(d.missing || []);
+
+  $("rec").innerHTML = FIELDS.map(f => {
+    const v = d.record[f];
+    const badge = missing.has(f) ? '<span class="badge b-miss">missing</span>'
+                : guessed.has(f) ? '<span class="badge b-guess">guessed</span>' : "";
+    const src = srcOf[f] ? `<div class="src">&ldquo;${esc(srcOf[f])}&rdquo;</div>` : "";
+    return `<tr class="${missing.has(f) ? "miss" : ""}">
+      <th>${LABEL(f)}</th><td>${v ? esc(v) : "—"}${badge}${src}</td></tr>`;
+  }).join("");
+  show($("out"), true);
+
+  if (d.question) {
+    $("qtext").textContent = d.question.text;
+    $("send").dataset.field = d.question.field;
+    show($("question"), true); show($("stop"), false);
+    $("ans").focus();
+    return;
+  }
+  show($("question"), false);
+
+  if (d.incomplete) {
+    $("stoptext").textContent = d.reason;
+    show($("stop"), true);
+  } else if (d.csv) {
+    show($("stop"), false);
+    const pre = $("csv");
+    if (!pre.textContent) pre.textContent = FIELDS.join(",");
+    pre.textContent += "\n" + d.csv;
+    show($("csvbox"), true);
+  }
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+}
+</script>
+</body>
+</html>
