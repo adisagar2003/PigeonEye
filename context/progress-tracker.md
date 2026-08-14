@@ -5,6 +5,8 @@ decided, what's still open.
 
 Product definition: `context/project-overview.md`.
 Stack and boundaries: `context/architecture.md`.
+How code gets written: `coding-standards.md` — §7 of it requires this file to be
+updated in the same commit as any major architecture change.
 
 ---
 
