@@ -37,6 +37,34 @@ public struct Region: Codable, Sendable, Equatable {
     }
 }
 
+/// A deterministic shape a value can be checked against.
+///
+/// The rule lives here; the regex that implements it lives in `Tools`
+/// (`coding-standards.md` §1 — validation is split exactly one way). These are
+/// the highest-trust signal in the composite: `524-529` validates and
+/// `R G-2 26-O4871` does not, with no model involved (`architecture.md` §12).
+public enum Format: String, Codable, Sendable, CaseIterable {
+    case epaRegistration
+    case duration
+    case date
+    case amount
+    case formNumber
+    case rate
+
+    /// What a finding of this shape is called on screen (§11 — `label` is named
+    /// per document, and these are the names this corpus uses).
+    public var label: String {
+        switch self {
+        case .epaRegistration: "EPA reg. no."
+        case .duration: "Time window"
+        case .date: "Date"
+        case .amount: "Amount"
+        case .formNumber: "Form no."
+        case .rate: "Application rate"
+        }
+    }
+}
+
 /// One fillable field, read from the file's AcroForm rather than inferred.
 ///
 /// Carries no confidence and never will: `architecture.md` §9.1 — form fields

@@ -14,11 +14,16 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
-**F2 slice 2.1 is `in progress`.** The next row is **2.1 · the fields you must
-fill** (`features/02-form-mode.md`): any page carrying a `Widget` annotation makes
-the document a form, and the field list is read straight from the file with page
-and rect. Slice **2.2** (human labels for cryptic IRS field names) is deliberately
-deferred — see the decision log.
+**F3 slice 3.1 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
+by the file, and a form's field list is read straight out of the AcroForm with
+page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
+cryptic IRS field names) is deliberately deferred — see the decision log.
+
+The current row is **3.1 · deterministic findings**
+(`features/03-findings-you-can-trust.md`): format validators and Vision's data
+detectors, each finding carrying value, quote, page, region and origin, with
+**I2**'s substring check at the single construction point. No confidence ring —
+that is 3.2.
 
 F1 is built, reviewed and corrected. The app opens a PDF or a scan, renders it,
 OCRs every page and shows the transcript — locally, with no Gate layer in the
@@ -40,8 +45,8 @@ feature has a spec under `context/features/`. One source of truth, per
 | # | Feature | Spec | Status |
 |---|---|---|---|
 | F1 | Read it locally | [`features/01-read-it-locally.md`](features/01-read-it-locally.md) | **complete** |
-| F2 | Form mode | [`features/02-form-mode.md`](features/02-form-mode.md) | **in progress** — 2.1 |
-| F3 | Findings you can trust | — | not started |
+| F2 | Form mode | [`features/02-form-mode.md`](features/02-form-mode.md) | **partial** — 2.1 complete, 2.2 deferred |
+| F3 | Findings you can trust | [`features/03-findings-you-can-trust.md`](features/03-findings-you-can-trust.md) | **in progress** — 3.1 |
 | F4 | Explain it | — | not started |
 | F5 | Escalate with consent | — | not started |
 | F6 | Fail honestly | — | not started |
@@ -478,6 +483,9 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **The no-network claim is scoped to the local tier, and the tier is disclosed at import** — not in settings, not in a tooltip | yours |
 | I1 and Boundary C in `architecture.md` reworded to be tier-conditional; the single-egress-function rule is unchanged in both tiers | consequence of the above |
 | **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
+| **I2 is enforced at one construction point in `Tools`, not per caller** — a caller cannot invent a quote because a caller cannot build a `Finding` any other way. A quote absent from the transcript yields nil rather than throwing, so one bad line does not cost the page its other findings | mine |
+| **Validators whole-match rather than contain** — `R G-2 26-O4871` is a real Vision misread from this corpus, and a containment check passes it the moment any fragment looks like a registration number | measurement |
+| **A finding's region is its whole line**, not the matched words — Vision returns per-line boxes and word boxes need a second request. Carried as a `ponytail:` ceiling; F5 crops this region so a tighter box is an upgrade | mine |
 | **Form fields get their own layer-0 type, `Field`, not a `Finding`** — `Finding.quote` is non-optional and I2 asserts it is a verbatim substring of the transcript; a widget has no quote, and bending it would make slice 3.1's substring check special-case `acroform` | yours |
 | **F2 ships as 2.1 alone; 2.2 (label resolution) is deferred** — F2 is a leaf that unblocks nothing, `issues.md`'s own cut order puts 2.2 third, and the demo beat works with raw IRS names | yours |
 | **2.2's accuracy will be measured as the OCR confidence of the line each label came from**, not against `assets/golden/funsd/` — FUNSD pages have no widgets, so scoring there needs a pseudo-widget rig that is a slice of its own | yours |

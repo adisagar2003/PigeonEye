@@ -22,9 +22,12 @@ public final class ReaderModel {
 
     public var page = 1 { didSet { Task { await loadPageImage() } } }
     public var zoom = 1.0
-    /// The field the overlay outlines, or nil. Selection is a UI concern only —
-    /// the field list itself is ground truth from the file and never changes.
+    /// What the overlay outlines. Selection is a UI concern only — neither the
+    /// field list nor the findings change because something is selected. At most
+    /// one is set: selecting in either list clears the other, because two boxes
+    /// on one page with no way to tell which is which is worse than one.
     public private(set) var selectedField: Field?
+    public private(set) var selectedFinding: Finding?
     public var transcriptOpen = false
     public var inspectorOpen = false
 
@@ -98,6 +101,7 @@ public final class ReaderModel {
         page = 1
         zoom = 1
         selectedField = nil
+        selectedFinding = nil
 
         do {
             let document = try await read(url) { [weak self] done, total in
@@ -161,7 +165,15 @@ public final class ReaderModel {
     /// here to fall out of step with it.
     public func select(_ field: Field) {
         selectedField = field
+        selectedFinding = nil
         if page != field.page { page = field.page }
+    }
+
+    /// Jump to a finding's page and outline the region its quote came from.
+    public func select(_ found: Finding) {
+        selectedFinding = found
+        selectedField = nil
+        if page != found.page { page = found.page }
     }
 
     private func loadPageImage() async {
