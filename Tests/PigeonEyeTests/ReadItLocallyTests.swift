@@ -47,6 +47,14 @@ enum Fixture {
         .deletingLastPathComponent()
         .appending(path: "Fixtures/damaged-page-2.pdf")
 
+    /// Two pages; page 2 has `MediaBox [0 0 0 0]` and carries the file's only
+    /// `Widget`. Synthetic, like `damaged`, and for the same reason. It exists
+    /// to pin what PDFKit actually does with such a page — see
+    /// `pdfkit_hides_widgets_on_a_zero_sized_page`.
+    static let zeroSizedPage = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appending(path: "Fixtures/widget-on-zero-sized-page.pdf")
+
     static func temp(_ name: String) -> URL {
         FileManager.default.temporaryDirectory.appending(path: "pigeoneye-test-\(name)")
     }

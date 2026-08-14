@@ -90,7 +90,19 @@ public struct Field: Codable, Sendable, Equatable {
     /// Whether the overlay has a rect worth stroking. A widget with a zero-sized
     /// or off-page rect is still a field the user must fill, so it stays in the
     /// list — it just isn't drawn.
-    public var isDrawable: Bool { region.width > 0 && region.height > 0 }
+    ///
+    /// "Off-page" is the half that is easy to miss: a rect wholly outside the
+    /// media box has positive width and height, so a size check alone calls it
+    /// drawable and the overlay points at nothing.
+    public var isDrawable: Bool {
+        guard region.x.isFinite, region.y.isFinite,
+              region.width.isFinite, region.height.isFinite,
+              region.width > 0, region.height > 0
+        else { return false }
+        // Overlaps the page at all, rather than sitting entirely off one edge.
+        return region.x < 1 && region.y < 1
+            && region.x + region.width > 0 && region.y + region.height > 0
+    }
 }
 
 /// One page, read. Text only — page images are rendered on demand and

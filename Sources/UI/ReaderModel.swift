@@ -20,7 +20,17 @@ public final class ReaderModel {
     public private(set) var doc: Document?
     public private(set) var pageImage: CGImage?
 
-    public var page = 1 { didSet { Task { await loadPageImage() } } }
+    /// Blanking the image is the point, not a side effect: without it a jump to
+    /// another page draws the *new* page's highlight over the *old* page's
+    /// raster until the render lands — the reader pointing confidently at the
+    /// wrong place, which is the failure the highlight exists to avoid.
+    public var page = 1 {
+        didSet {
+            guard page != oldValue else { return }
+            pageImage = nil
+            Task { await loadPageImage() }
+        }
+    }
     public var zoom = 1.0
     /// What the overlay outlines. Selection is a UI concern only — neither the
     /// field list nor the findings change because something is selected. At most
@@ -153,7 +163,7 @@ public final class ReaderModel {
 
     public func step(_ delta: Int) {
         guard let doc else { return }
-        page = min(max(1, page + delta), doc.pagesRead)
+        page = min(max(1, page + delta), doc.navigablePageCount)
     }
 
     public func zoomBy(_ delta: Double) {
@@ -177,7 +187,7 @@ public final class ReaderModel {
     }
 
     private func loadPageImage() async {
-        guard let document = doc, page >= 1, page <= document.pagesRead else {
+        guard let document = doc, page >= 1, page <= document.navigablePageCount else {
             pageImage = nil
             return
         }

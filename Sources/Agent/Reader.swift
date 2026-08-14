@@ -60,6 +60,16 @@ public struct Document: Sendable {
     /// a single `Widget` annotation anywhere makes this a form.
     public var isForm: Bool { !fields.isEmpty }
 
+    /// The last page the reader can actually show.
+    ///
+    /// Normally `pagesRead`, but the field list is read from the *whole* file
+    /// while OCR stops at `Limits.maxPages` — so a 200-page form can list a
+    /// field on page 150. Rasterising that page needs no OCR, so listing a field
+    /// the user then cannot open would be the app lying about its own list.
+    public var navigablePageCount: Int {
+        max(pagesRead, fields.map(\.page).max() ?? 0)
+    }
+
     /// **I5** — rendered unconditionally, never behind a disclosure.
     public var pagesReadLine: String {
         pagesRead == 1 ? "read page 1 of \(pageCount)"

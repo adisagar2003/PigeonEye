@@ -191,7 +191,7 @@ public struct ReaderScreen: View {
             Spacer()
 
             step("‹", .leftArrow, "⌘←") { model.step(-1) }
-            Text("page \(model.page) / \(doc.pagesRead)")
+            Text("page \(model.page) / \(doc.navigablePageCount)")
                 .font(.body(11.5)).monospacedDigit()
                 .foregroundStyle(Ink.neutral700).frame(minWidth: 78)
             step("›", .rightArrow, "⌘→") { model.step(1) }
