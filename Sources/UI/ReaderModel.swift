@@ -22,6 +22,9 @@ public final class ReaderModel {
 
     public var page = 1 { didSet { Task { await loadPageImage() } } }
     public var zoom = 1.0
+    /// The field the overlay outlines, or nil. Selection is a UI concern only —
+    /// the field list itself is ground truth from the file and never changes.
+    public private(set) var selectedField: Field?
     public var transcriptOpen = false
     public var inspectorOpen = false
 
@@ -63,16 +66,28 @@ public final class ReaderModel {
     /// worst way to be wrong.
     private var requestID = UUID()
 
-    /// What is on screen, or on its way there. Held so that asking for the same
-    /// document twice is free — see the guard in `open`.
-    private var current: URL?
+    /// What is on screen, or on its way there — **path and modification date**.
+    /// Path alone would latch onto a file that has since been re-saved, and the
+    /// reader would show a transcript of bytes that no longer exist with no way
+    /// to escape but opening something else first.
+    private var current: (url: URL, modified: Date?)?
+
+    /// Set when `open` declined to re-read what is already on screen. The screen
+    /// renders it, because a click that produces nothing at all reads as a hang
+    /// — and this app does not get to be silent about what it is doing.
+    public private(set) var notice: String?
+    private var noticeID = UUID()
 
     public func open(_ url: URL) async {
         // Already read, or already reading. A second pass costs ~15s and cannot
         // return anything different, and because the pane is blanked first, it
         // showed as the current document vanishing and coming back.
-        guard current != url else { return }
-        current = url
+        let stamp = Self.modified(url)
+        guard current?.url != url || current?.modified != stamp else {
+            return flash("Already open — read once, kept until you open another.")
+        }
+        current = (url, stamp)
+        notice = nil
 
         let id = UUID()
         requestID = id
@@ -82,6 +97,7 @@ public final class ReaderModel {
         pageImage = nil
         page = 1
         zoom = 1
+        selectedField = nil
 
         do {
             let document = try await read(url) { [weak self] done, total in
@@ -111,6 +127,26 @@ public final class ReaderModel {
         await open(Self.repoRoot.appending(path: fixture.path))
     }
 
+    /// Show a message and take it away again. Generation-token clearing for the
+    /// same reason `requestID` exists: two presses in quick succession must not
+    /// let the first one's timer wipe the second one's message.
+    private func flash(_ message: String) {
+        let id = UUID()
+        noticeID = id
+        notice = message
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard let self, self.noticeID == id else { return }
+            self.notice = nil
+        }
+    }
+
+    /// The file's modification date, or nil if it cannot be read — in which case
+    /// the latch falls back to comparing paths alone.
+    private static func modified(_ url: URL) -> Date? {
+        try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate] as? Date
+    }
+
     public func step(_ delta: Int) {
         guard let doc else { return }
         page = min(max(1, page + delta), doc.pagesRead)
@@ -118,6 +154,14 @@ public final class ReaderModel {
 
     public func zoomBy(_ delta: Double) {
         zoom = Zoom.stepped(from: zoom, by: delta)
+    }
+
+    /// Jump to a field's page and outline it. Assigning `page` is what loads the
+    /// image — the existing `didSet` owns that, so there is no second load path
+    /// here to fall out of step with it.
+    public func select(_ field: Field) {
+        selectedField = field
+        if page != field.page { page = field.page }
     }
 
     private func loadPageImage() async {

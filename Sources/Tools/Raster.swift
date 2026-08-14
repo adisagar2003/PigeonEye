@@ -74,7 +74,11 @@ public func image(at url: URL) throws -> CGImage {
 
 /// Opens read-only and hands the document to `body`. **I7** — there is no
 /// write path to the input anywhere in this file.
-private func withDocument<T>(_ url: URL, _ body: (PDFDocument) throws -> T) throws -> T {
+///
+/// Internal rather than private so `Form.swift` opens PDFs the same way: the
+/// not-a-PDF, password-protected and no-pages refusals have one home
+/// (`coding-standards.md` §1.1), not one per caller.
+func withDocument<T>(_ url: URL, _ body: (PDFDocument) throws -> T) throws -> T {
     guard let doc = PDFDocument(url: url) else {
         throw ReadFailure.unreadable(name: url.lastPathComponent, why: "it is not a readable PDF")
     }

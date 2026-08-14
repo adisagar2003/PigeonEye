@@ -37,6 +37,34 @@ public struct Region: Codable, Sendable, Equatable {
     }
 }
 
+/// One fillable field, read from the file's AcroForm rather than inferred.
+///
+/// Carries no confidence and never will: `architecture.md` §9.1 — form fields
+/// are ground truth from the file, exact by construction, so **I3** does not
+/// apply to them. That is the whole reason form mode is worth having.
+public struct Field: Codable, Sendable, Equatable {
+    /// The raw AcroForm field name. IRS ships XFA paths
+    /// (`topmostSubform[0].Page1[0].f1_04[0]`), NRCS ships readable ones
+    /// (`Application Date`). Slice 2.2 resolves the first kind; until then this
+    /// is what the user sees.
+    public let name: String
+    /// `PDFAnnotation.widgetFieldType` — `/Tx`, `/Btn`, `/Ch`, `/Sig`.
+    public let kind: String
+    /// 1-based, so `Document.pages[field.page - 1]` is this field's page.
+    public let page: Int
+    /// Normalised, upper-left — the same origin `Line.bbox` uses (**I12**).
+    public let region: Region
+
+    public init(name: String, kind: String, page: Int, region: Region) {
+        self.name = name; self.kind = kind; self.page = page; self.region = region
+    }
+
+    /// Whether the overlay has a rect worth stroking. A widget with a zero-sized
+    /// or off-page rect is still a field the user must fill, so it stays in the
+    /// list — it just isn't drawn.
+    public var isDrawable: Bool { region.width > 0 && region.height > 0 }
+}
+
 /// One page, read. Text only — page images are rendered on demand and
 /// discarded, so a 45-page document does not hold 45 bitmaps.
 public struct Page: Codable, Sendable {

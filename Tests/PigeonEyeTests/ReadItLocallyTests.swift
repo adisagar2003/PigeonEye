@@ -21,8 +21,24 @@ enum Fixture {
 
     static let label = root.appending(path: "assets/epa-labels/000524-00529-20241120.pdf")
     static let shortLabel = root.appending(path: "assets/epa-labels/007969-00242-20170111.pdf")
-    static let scan = root.appending(path: "assets/scans/007969-00242-20170111-01.jpg")
+    /// Named for what it is. This page is a *clean digital render* — the
+    /// `WEAL PROTECTED` misread recorded against it comes from the circular
+    /// seal, not from scan damage. It is the fast one-page image the tests use
+    /// when the subject is anything other than degradation.
+    static let cleanPage = root.appending(path: "assets/scans/007969-00242-20170111-01.jpg")
+
+    /// An actual bad scan: photocopy speckle, skew, a `SEP 11 2008` stamp and
+    /// handwritten annotations. 36 lines at mean confidence 0.56, six of them
+    /// below `Thresholds.escalate`.
+    static let degradedScan = root.appending(path: "assets/scans/007969-00186-20080911-01.jpg")
+
     static let form = root.appending(path: "assets/gov-forms/IRS-ScheduleF-farm-profit-loss.pdf")
+
+    /// The three born-digital forms, with the widget counts `spike_form.swift`
+    /// measured. IRS names are XFA-cryptic, NRCS names are human-readable —
+    /// which is the whole reason slice 2.2 exists.
+    static let irs4835 = root.appending(path: "assets/gov-forms/IRS-4835-farm-rental-income.pdf")
+    static let cpa1200 = root.appending(path: "assets/gov-forms/NRCS-CPA-1200-conservation-application.pdf")
 
     /// Three pages; page 2 has `MediaBox [0 0 0 0]`, so it cannot be rendered
     /// while 1 and 3 can. Synthetic on purpose — no real document in `assets/`
@@ -38,16 +54,29 @@ enum Fixture {
 
 // MARK: - 1 · OCR reads a real scan
 
+/// This used to run against a clean digital render, so "reads a degraded scan"
+/// asserted nothing about degradation — it was green for the wrong reason.
+/// Floors, not exact scores (`coding-standards.md` §4): the measured numbers
+/// live in `progress-tracker.md` and an exact assertion here would flap.
 @Test func ocr_reads_a_degraded_scan() async throws {
-    let page = try await ocr(image(at: Fixture.scan))
-    #expect(!page.lines.isEmpty)
+    let page = try await ocr(image(at: Fixture.degradedScan))
+
+    // It still reads. Degradation must not become an excuse for giving up.
+    #expect(page.lines.count >= 25, "read only \(page.lines.count) lines")
     #expect(page.transcript.uppercased().contains("REGISTRATION"))
+
+    // And the damage is visible to the confidence machinery rather than hidden
+    // behind a uniformly high score — the seal fragments read at ~0.26.
+    let mean = try #require(page.meanConfidence)
+    #expect(mean < Thresholds.fairlySure, "mean confidence \(mean) — too clean to be the degraded fixture")
+    #expect(page.lines.contains { $0.conf < Float(Thresholds.escalate) },
+            "nothing scored below the escalate threshold; low confidence is not being reported")
 }
 
 // MARK: - 2 · The coordinate origin is flipped once, at Boundary A
 
 @Test func bbox_origin_is_upper_left() async throws {
-    let page = try await ocr(image(at: Fixture.scan))
+    let page = try await ocr(image(at: Fixture.cleanPage))
     // The letterhead is printed at the top of the page. Flipped, it reads
     // y ≈ 0.05; under Vision's own lower-left origin it reads y ≈ 0.94.
     let head = try #require(page.lines.first { $0.text.uppercased().contains("ENVIRONMENTAL PROTECTION AGENCY") })
@@ -58,7 +87,7 @@ enum Fixture {
 // MARK: - 3 · The crop round-trip, which is what makes I12 real
 
 @Test func crop_of_a_line_reads_back_as_that_line() async throws {
-    let img = try image(at: Fixture.scan)
+    let img = try image(at: Fixture.cleanPage)
     let page = try await ocr(img)
     // A long line, so OCR of the crop has something to hold on to.
     let line = try #require(page.lines.filter { $0.text.count > 24 }.min { $0.region.y < $1.region.y })
@@ -116,7 +145,7 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
 }
 
 @Test func reading_an_image_needs_no_rasterisation() async throws {
-    let doc = try await read(Fixture.scan)
+    let doc = try await read(Fixture.cleanPage)
     #expect(doc.pageCount == 1)
     #expect(doc.pagesReadLine == "read page 1 of 1")
     #expect(!doc.pages[0].transcript.isEmpty)
@@ -199,7 +228,7 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
 }
 
 @Test func the_log_records_that_nothing_left_the_machine() async throws {
-    let doc = try await read(Fixture.scan)
+    let doc = try await read(Fixture.cleanPage)
     #expect(doc.log.contains { $0.message == "network calls: 0" })
 }
 
@@ -253,10 +282,10 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
     let model = ReaderModel()
 
     async let slowFirst: Void = model.open(Fixture.label)   // 45 pages, ~23s
-    async let fastSecond: Void = model.open(Fixture.scan)   // 1 image, ~4s
+    async let fastSecond: Void = model.open(Fixture.cleanPage)   // 1 image, ~4s
     _ = await (slowFirst, fastSecond)
 
-    #expect(model.doc?.url == Fixture.scan, "the earlier, slower read overwrote the newer document")
+    #expect(model.doc?.url == Fixture.cleanPage, "the earlier, slower read overwrote the newer document")
     #expect(model.doc?.pageCount == 1)
 }
 
@@ -267,15 +296,43 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
 @Test @MainActor func the_document_on_screen_is_not_read_a_second_time() async {
     let model = ReaderModel()
 
-    await model.open(Fixture.scan)
+    await model.open(Fixture.cleanPage)
     let firstRead = model.doc?.log.first?.id
     #expect(firstRead != nil)
 
-    await model.open(Fixture.scan)
+    await model.open(Fixture.cleanPage)
 
     // A second read builds a fresh log with fresh Step ids. Same id ⇒ the
     // document on screen is the one already read, untouched.
     #expect(model.doc?.log.first?.id == firstRead, "the same document was read twice")
+
+    // Not re-reading is right; doing it silently is not. Pick the file you
+    // already have open out of the file dialog and the app has to say
+    // something, or the click looks like a hang.
+    #expect(model.notice != nil, "the declined re-read produced no acknowledgement at all")
+}
+
+/// The latch keys on modification date as well as path. Without that, a file
+/// re-saved on disk could never be re-read — you would be shown a transcript of
+/// bytes that no longer exist, with no way out but opening something else.
+@Test @MainActor func a_file_that_changed_on_disk_is_read_again() async throws {
+    // .jpg, so both revisions are the same kind and only the bytes differ.
+    let url = Fixture.temp("changing.jpg")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    try Data(contentsOf: Fixture.cleanPage).write(to: url)
+    let model = ReaderModel()
+    await model.open(url)
+    let firstRead = model.doc?.log.first?.id
+    #expect(firstRead != nil)
+
+    // Same path, different bytes and a later modification date.
+    try Data(contentsOf: Fixture.degradedScan).write(to: url)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)],
+                                          ofItemAtPath: url.path)
+    await model.open(url)
+
+    #expect(model.doc?.log.first?.id != firstRead, "the stale transcript was kept after the file changed")
 }
 
 /// Zoom multiplied the delta by 100 before adding it, so the first click of

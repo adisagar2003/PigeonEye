@@ -219,11 +219,12 @@ network and no downloads.** Handy has to ask for a model download; you don't.
 
 | Boundary | Contract |
 |---|---|
+| **F** form | `pdf → [Field]` where `Field = (name, kind, page, region)`. The AcroForm widgets, read live from the file. **Built** in slice 2.1. Not inference — ground truth — so no confidence, no gate, no escalation, and **I3** does not apply (§9.1). Sits alongside A rather than after it: it needs no OCR, so it runs before any page is rendered and decides the mode. |
 | **A** OCR | `image → [Line]` where `Line = (text, confidence, bbox, isTitle, candidates)`. Pure function, no state, no network. |
 | **B** reasoning | `[Line] + structure → [Finding]`. Chunked (§3.1). Swappable — this is the §3.2 fallback point. |
-| **C** gate | The only place a decision leaves the system. Must render the exact crop set before sending. |
+| **C** gate | The only place a decision leaves the system. **Local tier:** must render the exact crop set before sending. **Cloud tier:** no per-crop prompt — consent is taken at import for the whole document (`project-overview.md` §4.1) — but the egress function is still the only exit, and every escalation is still recorded and shown. |
 | **D** UI | In-process SwiftUI state. Native has no HTTP boundary here — one fewer surface than the Tauri/Electron design. |
-| **Trust** | Crops only. Never the source file, never the full transcript, never a whole page image. |
+| **Trust** | Local tier: crops only. Cloud tier: transcript text + crops, under the import-time grant. Either way: never the source file bytes, never a whole page image. |
 
 **The trust boundary is the product.** Everything else is replaceable.
 
@@ -270,7 +271,7 @@ Each is written to be checkable by a test, not by inspection.
 
 | # | Invariant | Enforcement |
 |---|---|---|
-| **I1** | No document bytes cross the trust boundary except crops the user explicitly approved | Single egress function; assert payload contains only regions from the approved set |
+| **I1** | Nothing crosses the trust boundary outside the scope the user consented to for *this* document. **Local tier:** approved crops only, per crop. **Cloud tier:** transcript text and crops, inside the import-time grant — never the source file bytes, never a whole page image | Single egress function, whatever the tier; assert the payload is within the granted scope and that a grant exists at all |
 | **I2** | Every rendered value traces to a quote that is a verbatim substring of the transcript | Substring assertion per finding; a fabricated quote fails a test |
 | **I3** | A finding failing its format validator can never render green | Composite clamps on validator failure |
 | **I4** | Confidence is never solely model self-report | Composite requires ≥1 non-model signal; inspector shows the breakdown |
@@ -391,6 +392,13 @@ variety, so adding a document family never means a schema migration:
 | `region` | bbox \| null | for crop escalation and highlight overlay; one coordinate origin (**I12**, §8.1) |
 | `validated` | bool \| null | did it pass a format validator? |
 | `origin` | enum | `acroform` \| `datadetector` \| `validator` \| `model` — which tier produced it. Drives §12's green rule, and **I3** doesn't apply to `acroform` (§9.1). |
+
+**Form mode's output is not a `Finding`.** Slice 2.1 added `Field = (name, kind,
+page, region)` in layer 0 instead. `Finding.quote` is required and **I2** asserts
+it is a verbatim substring of the transcript; an unfilled widget has no quote, so
+reusing `Finding` would have meant special-casing `acroform` inside the one
+substring check I2 depends on. A form document carries both: `Document.fields`
+for what must be filled, `findings` for what was read.
 
 ## 12. Confidence composite
 
