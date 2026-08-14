@@ -125,6 +125,23 @@ public enum Thresholds {
     }
 }
 
+/// Page-zoom bounds and the step the toolbar moves by.
+///
+/// One home, because the bug that put it here was exactly a mismatch between
+/// the step the buttons passed and the arithmetic that consumed it
+/// (`coding-standards.md` §1.1).
+public enum Zoom {
+    public static let min = 0.7
+    public static let max = 1.6
+    public static let step = 0.15
+
+    /// Clamped to `min...max` and rounded to whole percent, so the label the UI
+    /// shows is exactly the value held.
+    public static func stepped(from current: Double, by delta: Double) -> Double {
+        Swift.min(max, Swift.max(min, ((current + delta) * 100).rounded() / 100))
+    }
+}
+
 public enum Limits {
     public static let maxBytes = 20 * 1_048_576
     /// Render DPI. 150 measured sufficient; 300 doubles render time for no CER gain.

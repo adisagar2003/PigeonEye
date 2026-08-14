@@ -88,6 +88,25 @@ public struct Blueprint: ViewModifier {
     }
 }
 
+// MARK: - Buttons
+
+/// Every button in this app is a bordered label with no fill, and `.plain`
+/// hit-tests only what is actually drawn — the glyph and the 1pt border. The
+/// padded interior is empty, so a click 4pt away from the `+` fell straight
+/// through to the view behind. `contentShape` makes the whole frame the
+/// target, and it belongs here rather than at seven call sites.
+public struct Flat: ButtonStyle {
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.55 : 1)
+    }
+}
+
+public extension ButtonStyle where Self == Flat {
+    static var flat: Flat { Flat() }
+}
+
 public extension View {
     func blueprint(stroke: Color = Ink.divider, marks: Color = Ink.text.opacity(0.55)) -> some View {
         modifier(Blueprint(stroke: stroke, marks: marks))
