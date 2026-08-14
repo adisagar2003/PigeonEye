@@ -27,34 +27,6 @@ public final class ReaderModel {
 
     public init() {}
 
-    /// The two fixtures are real documents from `assets/`, opened the same way
-    /// the file picker opens anything else. The design's third fixture is a
-    /// university registrar notice, which is outside scope §7.
-    public struct Fixture: Identifiable, Sendable {
-        public let id: String
-        public let label: String
-        public let path: String
-    }
-
-    /// `007969-00242-...-01.jpg` used to sit behind "Bad scan" and is not one —
-    /// it is a clean digital render, and the `WEAL PROTECTED` misread recorded
-    /// against it comes from the circular seal, not from scan damage. A fixture
-    /// button whose label is false about its own document is the exact failure
-    /// `project-overview.md` §9 forbids.
-    ///
-    /// The replacement is the whole 40-page photocopy rather than one page of
-    /// it: degradation is not uniform down a document, and one good page proves
-    /// nothing about the confidence reading on page 39.
-    public static let fixtures: [Fixture] = [
-        .init(id: "label", label: "EPA letter", path: "assets/epa-labels/000524-00529-20241120.pdf"),
-        .init(id: "scan", label: "Bad scan", path: "assets/epa-labels/007969-00186-20080911.pdf"),
-    ]
-
-    public var activeFixture: String? {
-        guard let doc else { return nil }
-        return Self.fixtures.first { doc.url.path.hasSuffix($0.path) }?.id
-    }
-
     /// Identifies the newest request. Every `await` in this file is a point where
     /// an older, slower read can come back and clobber a newer one — a 45-page
     /// label takes ~5x a one-page scan, so "open A, then open B" really does
@@ -107,10 +79,6 @@ public final class ReaderModel {
         }
     }
 
-    public func openFixture(_ fixture: Fixture) async {
-        await open(Self.repoRoot.appending(path: fixture.path))
-    }
-
     public func step(_ delta: Int) {
         guard let doc else { return }
         page = min(max(1, page + delta), doc.pagesRead)
@@ -133,12 +101,4 @@ public final class ReaderModel {
         guard requestID == id, page == requestedPage, doc?.url == document.url else { return }
         pageImage = rendered
     }
-
-    /// ponytail: fixtures are found relative to the source tree, because a
-    /// SwiftPM executable has no bundle to put resources in. The day this ships
-    /// as a signed .app, they become bundle resources or the buttons go away.
-    static let repoRoot = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // UI
-        .deletingLastPathComponent()  // Sources
-        .deletingLastPathComponent()  // repo root
 }

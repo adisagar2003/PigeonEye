@@ -14,8 +14,9 @@ public struct ReaderScreen: View {
     @State private var picking = false
 
     /// ponytail: `UserDefaults` under the process name, because a SwiftPM
-    /// executable has no bundle — same ceiling as the fixture paths in
-    /// `ReaderModel`. It lands in `~/Library/Preferences/PigeonEye.plist` and
+    /// executable has no bundle. This is now the *only* place that ceiling is
+    /// still felt — the fixture paths that shared it are gone.
+    /// It lands in `~/Library/Preferences/PigeonEye.plist` and
     /// survives a rebuild, which is what "first run only" has to mean. When
     /// this ships as a signed .app the key moves to the bundle's domain, and
     /// existing installs see the explainer once more.
@@ -66,30 +67,6 @@ public struct ReaderScreen: View {
                     .foregroundStyle(Ink.accent300)
             }
             Spacer()
-
-            HStack(spacing: 0) {
-                ForEach(ReaderModel.fixtures) { fixture in
-                    let on = model.activeFixture == fixture.id
-                    Button { Task { await model.openFixture(fixture) } } label: {
-                        Text(fixture.label)
-                            .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(on ? Ink.accent300 : .clear)
-                            .foregroundStyle(on ? Ink.accent900 : Ink.accent200)
-                    }
-                    .buttonStyle(.flat)
-                    // No ⌘1/⌘2 here. Those are "switch to tab N" everywhere
-                    // else on the platform, and binding them to a fixture meant
-                    // a reflex keystroke replaced the document being read with
-                    // a demo one.
-                    .help(fixture.label)
-                    if fixture.id != ReaderModel.fixtures.last?.id {
-                        Rectangle().fill(Ink.accent600).frame(width: 1)
-                    }
-                }
-            }
-            .fixedSize()
-            .overlay(Rectangle().stroke(Ink.accent600, lineWidth: 1))
 
             Button { picking = true } label: {
                 Text("Open…")
