@@ -36,9 +36,18 @@ public final class ReaderModel {
         public let path: String
     }
 
+    /// `007969-00242-...-01.jpg` used to sit behind "Bad scan" and is not one —
+    /// it is a clean digital render, and the `WEAL PROTECTED` misread recorded
+    /// against it comes from the circular seal, not from scan damage. A fixture
+    /// button whose label is false about its own document is the exact failure
+    /// `project-overview.md` §9 forbids.
+    ///
+    /// The replacement is the whole 40-page photocopy rather than one page of
+    /// it: degradation is not uniform down a document, and one good page proves
+    /// nothing about the confidence reading on page 39.
     public static let fixtures: [Fixture] = [
         .init(id: "label", label: "EPA letter", path: "assets/epa-labels/000524-00529-20241120.pdf"),
-        .init(id: "scan", label: "Bad scan", path: "assets/scans/007969-00242-20170111-01.jpg"),
+        .init(id: "scan", label: "Bad scan", path: "assets/epa-labels/007969-00186-20080911.pdf"),
     ]
 
     public var activeFixture: String? {
@@ -54,7 +63,17 @@ public final class ReaderModel {
     /// worst way to be wrong.
     private var requestID = UUID()
 
+    /// What is on screen, or on its way there. Held so that asking for the same
+    /// document twice is free — see the guard in `open`.
+    private var current: URL?
+
     public func open(_ url: URL) async {
+        // Already read, or already reading. A second pass costs ~15s and cannot
+        // return anything different, and because the pane is blanked first, it
+        // showed as the current document vanishing and coming back.
+        guard current != url else { return }
+        current = url
+
         let id = UUID()
         requestID = id
 
@@ -77,9 +96,13 @@ public final class ReaderModel {
             await loadPageImage()
         } catch let failure as ReadFailure {
             guard requestID == id else { return }
+            // A refused file has to stay retryable — otherwise picking the same
+            // file again from "Choose another file" would silently do nothing.
+            current = nil
             phase = .failed(failure.errorDescription ?? "That file could not be read.")
         } catch {
             guard requestID == id else { return }
+            current = nil
             phase = .failed(error.localizedDescription)
         }
     }

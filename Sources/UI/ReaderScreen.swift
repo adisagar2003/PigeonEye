@@ -58,7 +58,12 @@ public struct ReaderScreen: View {
                             .background(on ? Ink.accent300 : .clear)
                             .foregroundStyle(on ? Ink.accent900 : Ink.accent200)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.flat)
+                    // No ⌘1/⌘2 here. Those are "switch to tab N" everywhere
+                    // else on the platform, and binding them to a fixture meant
+                    // a reflex keystroke replaced the document being read with
+                    // a demo one.
+                    .help(fixture.label)
                     if fixture.id != ReaderModel.fixtures.last?.id {
                         Rectangle().fill(Ink.accent600).frame(width: 1)
                     }
@@ -74,7 +79,9 @@ public struct ReaderScreen: View {
                     .foregroundStyle(Ink.accent200)
                     .overlay(Rectangle().stroke(Ink.accent600, lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.flat)
+            .keyboardShortcut("o")
+            .help("Open a file (⌘O)")
 
             Button { model.inspectorOpen.toggle() } label: {
                 Text("Inspector")
@@ -84,7 +91,9 @@ public struct ReaderScreen: View {
                     .foregroundStyle(model.inspectorOpen ? Ink.accent900 : Ink.accent200)
                     .overlay(Rectangle().stroke(model.inspectorOpen ? Ink.accent300 : Ink.accent600, lineWidth: 1))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.flat)
+            .keyboardShortcut("i")
+            .help("Inspector (⌘I)")
         }
         .padding(.horizontal, 18).padding(.vertical, 10)
         .background(Ink.accent900)
@@ -155,32 +164,36 @@ public struct ReaderScreen: View {
 
             Spacer()
 
-            step("‹") { model.step(-1) }
+            step("‹", .leftArrow, "⌘←") { model.step(-1) }
             Text("page \(model.page) / \(doc.pagesRead)")
                 .font(.body(11.5)).monospacedDigit()
                 .foregroundStyle(Ink.neutral700).frame(minWidth: 78)
-            step("›") { model.step(1) }
+            step("›", .rightArrow, "⌘→") { model.step(1) }
 
             Rectangle().fill(Ink.divider).frame(width: 1, height: 16)
 
-            step("−") { model.zoomBy(-Zoom.step) }
+            step("−", "-", "⌘−") { model.zoomBy(-Zoom.step) }
             Text("\(Int((model.zoom * 100).rounded()))%")
                 .font(.body(11.5)).monospacedDigit()
                 .foregroundStyle(Ink.neutral700).frame(minWidth: 38)
-            step("+") { model.zoomBy(Zoom.step) }
+            // "=" not "+", so zooming in does not also require shift.
+            step("+", "=", "⌘+") { model.zoomBy(Zoom.step) }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(Ink.bg)
     }
 
-    private func step(_ glyph: String, action: @escaping () -> Void) -> some View {
+    private func step(_ glyph: String, _ key: KeyEquivalent, _ hint: String,
+                      action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(glyph)
                 .font(.body(13)).foregroundStyle(Ink.neutral700)
                 .frame(minWidth: 26).padding(.vertical, 3)
                 .overlay(Rectangle().stroke(Ink.divider, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.flat)
+        .keyboardShortcut(key)
+        .help(hint)
     }
 
     private var pageView: some View {
@@ -216,7 +229,7 @@ public struct ReaderScreen: View {
                     .background(Ink.accent).foregroundStyle(Ink.bg)
                     .blueprint(stroke: Ink.accent)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.flat)
             .padding(.top, 6)
 
             Text("PDF, PNG or JPEG · up to 20 MB")
@@ -254,7 +267,7 @@ public struct ReaderScreen: View {
                     .foregroundStyle(Ink.accent700)
                     .overlay(Rectangle().fill(Ink.accent400).frame(height: 1), alignment: .bottom)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.flat)
         }
         .frame(maxWidth: 420, alignment: .leading)
         .padding(24)
@@ -292,15 +305,30 @@ public struct ReaderScreen: View {
                     .foregroundStyle(Ink.accent700)
                     .overlay(Rectangle().fill(Ink.accent400).frame(height: 1), alignment: .bottom)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.flat)
+            .keyboardShortcut("t")
+            .help("Show the text it read (⌘T)")
 
             if model.transcriptOpen {
+                // One `Text` holding the joined transcript is what froze the
+                // window: 45 pages is ~130 KB, SwiftUI lays all of it out in a
+                // single pass, and text layout cannot leave the main thread —
+                // so a background task would have moved the join (~1 ms) and
+                // left the freeze exactly where it was. A LazyVStack lays out
+                // the pages actually on screen. The cost is that a selection
+                // drag no longer spans two pages.
                 ScrollView {
-                    Text(doc.transcript)
-                        .font(.mono(11)).foregroundStyle(Ink.neutral800)
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
+                    LazyVStack(alignment: .leading, spacing: 12) {
+                        ForEach(doc.pages.indices, id: \.self) { index in
+                            if !doc.pages[index].transcript.isEmpty {
+                                Text(doc.pages[index].transcript)
+                                    .font(.mono(11)).foregroundStyle(Ink.neutral800)
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(12)
                 }
                 .frame(maxHeight: 320)
                 .background(Ink.neutral200)

@@ -260,6 +260,24 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
     #expect(model.doc?.pageCount == 1)
 }
 
+/// 🔥 Re-opening what is already on screen re-read it from scratch: ~15s, a
+/// blanked pane, and the same bytes. It was reachable by a single keystroke —
+/// so a stray press threw away the document the user was reading and replaced
+/// it with an identical copy 15 seconds later.
+@Test @MainActor func the_document_on_screen_is_not_read_a_second_time() async {
+    let model = ReaderModel()
+
+    await model.open(Fixture.scan)
+    let firstRead = model.doc?.log.first?.id
+    #expect(firstRead != nil)
+
+    await model.open(Fixture.scan)
+
+    // A second read builds a fresh log with fresh Step ids. Same id ⇒ the
+    // document on screen is the one already read, untouched.
+    #expect(model.doc?.log.first?.id == firstRead, "the same document was read twice")
+}
+
 /// Zoom multiplied the delta by 100 before adding it, so the first click of
 /// either button clamped to the minimum and it never moved again.
 @Test @MainActor func zoom_steps_by_the_delta_it_is_given() {
