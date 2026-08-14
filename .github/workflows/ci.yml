@@ -1,0 +1,17 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # syntax check — no project deps needed, nothing to install
+      - run: python -m compileall -q .
+      # ponytail: F/E9 only (undefined names, real errors). Widen the rule set
+      # once the existing BLE001/PLW1510 warnings are cleaned up.
+      - run: pipx run ruff check . --isolated --select F,E9
