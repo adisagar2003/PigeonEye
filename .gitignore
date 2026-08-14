@@ -8,3 +8,9 @@ spike_fm
 spike_form
 spike_vision
 .DS_Store
+
+# golden eval datasets — 157 MB, refetch with assets/golden/fetch.sh
+assets/golden/*
+!assets/golden/README.md
+!assets/golden/fetch.sh
+!assets/golden/verify.py
