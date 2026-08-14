@@ -20,18 +20,18 @@ without changing `context/` is incomplete (`coding-standards.md` §7).
 
 1. Read `ai-workflow.md`. It governs scope, questions, and tracker updates.
 2. Read the **Build order** table in `context/progress-tracker.md` and work
-   exactly one row. Set it to `in progress` first.
-3. Read `context/architecture.md` §8 and check the change against every
+   exactly one row — the `in progress` one, or the single next row named by
+   **Current phase**. Set it to `in progress` first.
+3. Read all of `context/architecture.md` §8 and check the change against every
    invariant it touches.
 4. Write the failing test first (`coding-standards.md` §4).
 
 ## The constraints that are not negotiable
 
 - **One unit at a time.** One build-order row, finished and tested, then stop.
-- **Invariants hold.** I1 single egress for approved crops only · I2 every value
-  quotes a verbatim substring · I3 validator failure can never render green ·
-  I6/I11 local result survives any cloud failure or skip · I7/I9 source never
-  modified, nothing persists · I12 one coordinate origin.
+- **All invariants hold.** The complete **I1–I13** table in
+  `context/architecture.md` §8 is authoritative. Read it there; there is no
+  summary here to rely on.
 - **Imports point down only.** A file's layer is its directory
   (`coding-standards.md` §1).
 - **Logs are allowlisted.** No document text, crop bytes, filename, path or key

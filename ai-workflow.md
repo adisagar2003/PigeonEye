@@ -10,6 +10,10 @@ Same test as the coding standards: every rule here is checkable by a diff.
 `context/progress-tracker.md` currently marked `in progress`, together with the
 sections of `context/` that row names. There is never more than one.
 
+If no row is `in progress`, **Current phase** must name exactly one next row.
+That row is the active spec; set it to `in progress` before writing code (§4).
+If **Current phase** names no row, or more than one, stop and ask (§3).
+
 ---
 
 ## 1. One unit at a time
@@ -36,18 +40,15 @@ Read `context/architecture.md` before generating any code — §6 boundaries, §
 storage model, §8 invariants **I1–I13**, §11 output contract, §12 confidence
 composite. Then `coding-standards.md` §1 for the layer table.
 
-These are not style preferences. Each is enforceable by a test:
+These are not style preferences. Each is enforceable by a test. The **complete
+I1–I13 table in `context/architecture.md` §8 is the authoritative list** — read
+it there, against the diff. No summary of it lives in this repo, because a
+summary is a second list that silently goes stale.
 
-- **I1** — document bytes leave only through the single egress function, and only
-  for crops the user approved.
-- **I2** — every rendered value quotes a verbatim substring of the transcript.
-- **I3** — a finding failing its format validator can never render green.
-- **I6 / I11** — the local result survives any cloud failure or skip.
-- **I7 / I9** — the source file is never modified; nothing persists past the session.
-- **I12** — one coordinate origin, converted once at Boundary A.
-- Imports point down only. A file's layer is its directory.
-- `coding-standards.md` §5.2 — no document text, crop bytes, filename, path or
-  key ever reaches a log.
+Two more, from `coding-standards.md`, that the table does not cover:
+
+- §1 — imports point down only. A file's layer is its directory.
+- §5.2 — no document text, crop bytes, filename, path or key ever reaches a log.
 
 Code that would weaken an invariant is not written and then flagged. It is
 stopped at §3.
@@ -108,8 +109,20 @@ is not.
 
 Applies here to Apple Vision / PDFKit / Foundation Models, any OpenAI-compatible
 client, and anything added later. Anthropic or Claude APIs → the `claude-api`
-skill, always, before opening the file. If no skill covers the library, read its
-actual headers or docs in this repo's `.venv`/SDK and cite what you read.
+skill when it is installed.
+
+If no installed skill covers the library, verify against a local source and cite
+the exact symbol you checked:
+
+- **Apple frameworks** — the active macOS SDK, not this repo:
+  `xcrun --show-sdk-path`, then the framework's `.swiftinterface`/headers under
+  `System/Library/Frameworks`.
+- **Python packages** — the installed package in `.venv`.
+- **Anything else** — the installed client's headers, or the vendor's official
+  API docs.
+
+Not finding a skill is never a reason to stop, and never a reason to write the
+call from memory.
 
 Verify the API exists before depending on it. `context/architecture.md` marks
 checked facts **[verified in SDK]** — match that bar or mark the claim unverified.
@@ -119,7 +132,8 @@ checked facts **[verified in SDK]** — match that bar or mark the claim unverif
 - [ ] Exactly one build-order row touched; it was `in progress` before code was written.
 - [ ] That row's **Done when** is satisfied by a test that was actually run.
 - [ ] Failing test came first, and its failure message was read.
-- [ ] No invariant weakened; §2 list re-read against the diff.
+- [ ] No invariant weakened; the I1–I13 table in `context/architecture.md` §8
+      re-read against the diff.
 - [ ] Nothing implemented that the row didn't ask for.
 - [ ] No working code refactored that the spec didn't name.
 - [ ] Third-party APIs taken from a skill or verified source, not memory.
