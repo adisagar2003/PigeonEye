@@ -13,9 +13,28 @@ public struct ReaderScreen: View {
     @State private var model = ReaderModel()
     @State private var picking = false
 
+    /// ponytail: `UserDefaults` under the process name, because a SwiftPM
+    /// executable has no bundle — same ceiling as the fixture paths in
+    /// `ReaderModel`. It lands in `~/Library/Preferences/PigeonEye.plist` and
+    /// survives a rebuild, which is what "first run only" has to mean. When
+    /// this ships as a signed .app the key moves to the bundle's domain, and
+    /// existing installs see the explainer once more.
+    @AppStorage("onboardingSeen") private var onboardingSeen = false
+
     public init() {}
 
     public var body: some View {
+        // Replaces the reader rather than sitting over it. An overlay left the
+        // header's focus ring drawing on top of the card — and a reader you can
+        // still tab into is not what a first run should offer.
+        if onboardingSeen {
+            reader
+        } else {
+            OnboardingScreen { onboardingSeen = true }
+        }
+    }
+
+    private var reader: some View {
         VStack(spacing: 0) {
             header
             HStack(spacing: 0) {
