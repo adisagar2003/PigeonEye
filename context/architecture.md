@@ -13,6 +13,14 @@ Provenance tags: **[verified]** measured or read from the SDK in this project ·
 
 ## 1. Recommendation up front
 
+> **⚠️ This section's premise has since changed — read `progress-tracker.md`
+> first.** The argument below rests on both AI tiers being Apple-only. The tool
+> layer is now deliberately **portable** (PyMuPDF/pdfium, Tesseract fallback,
+> Presidio) and the agent is **model-agnostic** (any OpenAI-compatible endpoint).
+> That removes the premise, so **Tauri is now genuinely defensible** and the UI
+> shell is an open decision, not a settled one. Native remains faster to build for
+> a 24-hour window; it is no longer the only coherent choice.
+
 **Build the hackathon version as a native macOS app: SwiftUI + PDFKit + Vision
 + Foundation Models. Not Electron. Not Tauri — yet.**
 
@@ -153,10 +161,13 @@ the PDF viewer and annotation layer are given to you.
 | PDF display + annotation overlay | PDFKit `PDFView` + overlay view | — |
 | Confidence rings, badges | SwiftUI shapes (`Circle().trim`) — no chart library | — |
 | Page rasterisation | PDFKit `PDFPage.thumbnail` / Core Graphics (replaces `pdftoppm` in-app) | `pdftoppm` verified for fixtures **[verified]** |
-| OCR | Vision `RecognizeDocumentsRequest` | working **[verified]** |
+| OCR | **`ocr(image) → [{text, confidence, x0,y0,x1,y1}]`** — Apple Vision on macOS, **Tesseract** portable fallback | both **[measured]**: Vision CER 26.9%/BER 20.1%, Tesseract 27.8%/31.6%, RapidOCR rejected at NSCER 47.6% |
 | Geometry + confidence | `doc.text.lines[].confidence` + corner points | in SDK **[verified]** |
-| Validators | Plain Swift regex + Vision `detectedData` | not built |
-| Local reasoning | Foundation Models, chunked per §3.1 | framework present **[verified]**, quality **[untested]** |
+| Validators | regex + `detectedData` / `dateparser`/Duckling for portability | not built |
+| PDF + form fields | **PyMuPDF** or pdfium (portable) — AcroForm widgets + rects + text layer | **[measured]** 63/89/105 named fields across the three forms |
+| Masking *(future)* | **Presidio** — reversible pseudonymisation built in | not built |
+| Agent orchestration | One OpenAI-compatible `/v1` client, swappable base URL | **decided** — cloud for the demo, local where hardware allows |
+| Local reasoning | Foundation Models, chunked per §3.1 | optional, not foundational. Device eligible **[measured]**, quality **[untested]**. mere.run **ruled out** — 16 GB headroom on a 16 GB machine |
 | Cloud escalation | OpenAI vision API, crops only | key not supplied |
 | Persistence | none (§7) | — |
 | Dependencies | **zero third-party** | — |

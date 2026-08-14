@@ -85,6 +85,20 @@ def ber(truth: str, hyp: str) -> float:
     return sum(((a - b) + (b - a)).values()) / total
 
 
+def nscer(truth: str, hyp: str) -> float:
+    """CER with all whitespace removed from both sides.
+
+    Separates two failures CER conflates. RapidOCR's default recogniser is the
+    *Chinese* PP-OCRv4 model, and Chinese has no inter-word spaces, so it emits
+    "26DavisDrive". That is a real defect, but a different one from misreading
+    characters - and it is fixable by swapping the recogniser, whereas bad
+    character recognition is not. A low NSCER with a high CER means "the letters
+    are right, the spaces are missing".
+    """
+    t, h = re.sub(r"\s+", "", truth), re.sub(r"\s+", "", hyp)
+    return cer(t, h)
+
+
 def find_pdf(base: str) -> Path | None:
     for d in PDF_DIRS:
         p = d / f"{base}.pdf"
@@ -124,8 +138,8 @@ def bench(label: str, engine: str, limit: int | None) -> dict:
     if not todo:
         sys.exit("no scan/pdf pairs found - run assets/degrade.sh first")
 
-    print(f"\n{'document':44} {'chars':>6} {'CER':>7} {'WER':>7} {'BER':>7}")
-    print("-" * 76)
+    print(f"\n{'document':44} {'chars':>6} {'CER':>7} {'WER':>7} {'BER':>7} {'NSCER':>7}")
+    print("-" * 84)
     for jpg, pdf, page in todo:
         t = truth_for(pdf, page)
         if len(t) < 200:          # cover pages / mostly-image pages aren't a fair test
@@ -133,21 +147,26 @@ def bench(label: str, engine: str, limit: int | None) -> dict:
             continue
         h = run_engine(engine, jpg)
         row = {"scan": jpg.name, "chars": len(t),
-               "cer": cer(t, h), "wer": wer(t, h), "ber": ber(t, h)}
+               "cer": cer(t, h), "wer": wer(t, h), "ber": ber(t, h),
+               "nscer": nscer(t, h)}
         rows.append(row)
         print(f"{jpg.stem:44} {row['chars']:>6} "
-              f"{row['cer']:>7.3f} {row['wer']:>7.3f} {row['ber']:>7.3f}")
+              f"{row['cer']:>7.3f} {row['wer']:>7.3f} {row['ber']:>7.3f} "
+              f"{row['nscer']:>7.3f}")
 
     if not rows:
         sys.exit("every page was skipped")
 
     # Weight by ground-truth length: a 2000-char page should count more than a 300-char one.
     tot = sum(r["chars"] for r in rows)
-    agg = {m: sum(r[m] * r["chars"] for r in rows) / tot for m in ("cer", "wer", "ber")}
-    print("-" * 76)
+    metrics = ("cer", "wer", "ber", "nscer")
+    agg = {m: sum(r[m] * r["chars"] for r in rows) / tot for m in metrics}
+    print("-" * 84)
     print(f"{label + ' (length-weighted)':44} {tot:>6} "
-          f"{agg['cer']:>7.3f} {agg['wer']:>7.3f} {agg['ber']:>7.3f}")
-    print(f"\n  pages={len(rows)}  CER {agg['cer']:.1%}  WER {agg['wer']:.1%}  BER {agg['ber']:.1%}")
+          f"{agg['cer']:>7.3f} {agg['wer']:>7.3f} {agg['ber']:>7.3f} "
+          f"{agg['nscer']:>7.3f}")
+    print(f"\n  pages={len(rows)}  CER {agg['cer']:.1%}  WER {agg['wer']:.1%}  "
+          f"BER {agg['ber']:.1%}  NSCER {agg['nscer']:.1%}")
     return {"label": label, "engine": engine, "aggregate": agg, "pages": rows}
 
 
@@ -155,7 +174,7 @@ def compare(a_path: str, b_path: str) -> None:
     a, b = (json.loads(Path(p).read_text()) for p in (a_path, b_path))
     print(f"\n{'metric':8} {a['label']:>16} {b['label']:>16}   {'winner':>16}")
     print("-" * 62)
-    for m in ("cer", "wer", "ber"):
+    for m in ("cer", "wer", "ber", "nscer"):
         av, bv = a["aggregate"][m], b["aggregate"][m]
         win = a["label"] if av < bv else b["label"] if bv < av else "tie"
         print(f"{m.upper():8} {av:>16.3f} {bv:>16.3f}   {win:>16}")

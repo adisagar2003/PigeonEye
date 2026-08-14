@@ -55,8 +55,9 @@ For EPA labels, `measurement` is the field type the whole document is about.
 `assets/` are born-digital, so `pdftotext` reads them near-perfectly, while
 `assets/scans/*.jpg` are the same pages degraded by `degrade.sh`. No hand-labelling.
 
-Three metrics because they fail differently — CER (characters), WER (words,
-order-sensitive), **BER** (bag-of-words, order-*insensitive*). Over 18 pages /
+Four metrics because they fail differently — CER (characters), WER (words,
+order-sensitive), **BER** (bag-of-words, order-*insensitive*), **NSCER** (CER with
+whitespace stripped, separating misreads from dropped spaces). Over 18 pages /
 39,883 chars:
 
 | Population | CER | BER | Verdict |
@@ -108,54 +109,130 @@ right can be extracted deterministically.** What actually needs a language model
 is the prose: the summary and the next-step wording.
 
 So: don't block on it. Build deterministic extraction now, and keep the
-explanation tier swappable with three implementations behind it — Foundation
-Models when available, OpenAI when not, and a template-only fallback that emits
-findings with no prose at all. The fallback means a failed model never blanks the
-screen.
+explanation tier swappable — Foundation Models where available, any
+OpenAI-compatible endpoint otherwise.
 
-This also resolves the "download models" tension. `architecture.md` §5 sells
-"nothing to download":
+**Device eligibility settled:** the reason code is `appleIntelligenceNotEnabled`,
+not `deviceNotEligible` — the SDK distinguishes the two, so the hardware is fine
+(M4, 16 GB, `en_CA`). It is one System Settings toggle away. Apple Intelligence is
+therefore *optional*, not foundational: it becomes the fully-local variant on
+capable devices, and nothing depends on it.
 
-- **Reading it as "enable Apple Intelligence"** — the download is Apple's, the app
-  just detects unavailability and links to Settings. Pitch survives.
-- **Reading it as "bundle a runtime and fetch a GGUF"** — the zero-download pitch
-  is gone, and per `architecture.md` §3.2 that's also what makes cross-platform
-  worth its cost. One decision, not two.
+#### The agent is the product — this constrains the above
 
-### mere.run — live candidate for the reasoning tier only
+The hackathon theme is **AI agents**, and Agent Design is 25% of the rubric. A
+deterministic pipeline with no model is a parser, not an agent: it would miss the
+theme and score near-zero on a quarter of the marks. **So the template-only
+fallback is not a viable shipping mode** — it was briefly proposed and is
+withdrawn.
 
-Reconsidered because the open question changed. It was cut when the question was
-OCR, where Apple Vision won on measurement. The question now is local LLM
-inference.
+The reconciliation: the deterministic tier is not a replacement for the agent, it
+is **the agent's tools**.
 
-What argues for it isn't the OCR: **`mere.run api serve` exposes an
-OpenAI-compatible `/v1/` endpoint.** That collapses the three-implementation
-swappable tier into one client with a configurable base URL — local is
-`localhost`, cloud is `api.openai.com`, identical request shape.
+```
+TOOLS (deterministic, local, cannot hallucinate)     AGENT DECIDES
+classify_document()  → form | document               mode, first move
+list_form_fields()   → widgets + page + rect         which fields matter
+ocr_page(n)          → lines + confidence + bbox     WHICH PAGES to read
+detect_data()        → dates, money, rates, addrs    obligation vs noise
+validate(v, kind)    → pass/fail + reason            good enough to show?
+crop_region(p, rect) → image crop                    worth escalating?
+escalate(crop)       → cloud read     [CONSENT]      ask the user, or skip
+ask_user(question)   → answer | skipped              is a question warranted?
+```
 
-| | Detail |
-|---|---|
-| License / stack | MIT, Swift 6, MLX + vendored llama.cpp |
-| macOS floor | 15+ (machine is 26.2 ✅); Linux headless too |
-| Models | downloaded on demand, `mere.run model pull` |
-| Maturity | 63 stars, 757 commits — active, small |
+The agentic decisions are real, not decoration: a **45-page** EPA label fits no
+context window, so choosing which pages to read *is* planning; the confidence gate
+is a bounded, observable branch; the consent gate is genuine human-in-the-loop.
 
-**Honest counterweight:** not safer, *differently* risky. It trades a known risk
-(Apple's model needs a toggle, may be too weak) for an unmeasured one
-(third-party runtime, multi-GB pull, unexercised integration).
+Why this scores: facts enter only via tools, each carrying a quote and a
+confidence — so the agent **structurally cannot fabricate a deadline**. That is the
+honesty rubric satisfied by architecture rather than by prompting.
 
-Supply chain, read from `Package.swift`: the ML core is `sawfwair/mlx-swift`, a
-**personal fork of Apple's mlx-swift pinned to a commit**, not upstream MLX;
-`swift-onnxruntime` pinned at 1.20.1. MIT means it can be vendored, but "safer
-than a first-party Apple framework" is harder to argue having seen the graph.
+#### Model-agnostic, decided
 
-Build cost so far: cloned 168 MB, `swift build -c release` consumed **~5 GB of
-disk** (15 GB → 10 GB free) and needed a resume. Target model
-`lightonai/LightOnOCR-2-1B` — 1B params, ≈2 GB, Apache 2.0.
+One OpenAI-compatible `/v1` client with a swappable base URL. Cloud for the demo
+(the key exists and tool-calling is reliable); local on capable hardware. This
+resolves the "download models" tension: the app detects local availability and
+degrades to a configured endpoint — Apple's download is Apple's, and nothing is
+bundled.
 
-**If adopted: reasoning tier only, keep `ocr.swift`.** Vision is measured working,
-needs no install, and supplies the per-line confidence, bboxes, tables and
-`detectedData` the whole escalation gate is built on.
+Caveat for the local path: Foundation Models' **4096-token** context is tight for
+an agent loop accumulating tool results. Viable only with aggressive per-step
+context trimming, and untested.
+
+### mere.run — ruled out on this hardware
+
+Evaluated properly, then ruled out. **Not a preference — a memory wall.**
+
+`vision ocr` refuses to start: *"only 2.96 GB of reclaimable memory is available;
+this workload requires at least **16 GB of admission headroom**."* The machine has
+16 GB **total**. Reproducible 2/2. macOS itself holds 3–5 GB, so even with every
+app closed the ceiling is ~11–12 GB — 16 GB of headroom on a 16 GB machine is not
+reachable. No override flag exists (`--min-pixels`/`--max-pixels` apply only to
+the `infinity` backend).
+
+That was the *smallest* option: `lightonai/LightOnOCR-2-1B`, 1B params, bf16,
+2.02 GB on disk. `vision-ocr-infinity-pro-int8` is larger; the `glm` backend needs
+a separate Python `glmocr` install.
+
+**The implication reaches past OCR.** mere.run's own README recommends
+`text-chat-gemma4-12b-4bit` for the 16–23 GB RAM tier. If a *1B* OCR model is
+refused at 16 GB headroom, a 12B chat model won't be admitted either — so the
+`api serve` reasoning tier, which was the genuinely strong argument for it, is
+almost certainly blocked here too. Unproven (would cost a 7 GB pull to confirm)
+but strongly implied.
+
+Secondary findings, both real:
+
+- **Does not compile from source** on Swift 6.2.3 / macOS 26.2. Two type-inference
+  errors in `Sources/MediaIO/MediaVideoIO.swift`; a 2-line annotation patch made it
+  worse (*"compiler unable to type-check this expression in reasonable time"*). The
+  **prebuilt signed DMG works fine** (`0.37.0`), so it's consumable as a released
+  artifact but not as a source dependency you can pin into your own build.
+- **Supply chain** (`Package.swift`): the ML core is `sawfwair/mlx-swift`, a
+  **personal fork of Apple's mlx-swift pinned to a commit**, not upstream MLX;
+  `swift-onnxruntime` pinned at exactly 1.20.1. MIT, so vendorable — but a
+  different risk profile from a first-party framework, not a smaller one.
+
+Cost of establishing this: ~5.8 GB of disk across 4 failed builds, a 264 MB DMG,
+a 2.02 GB model pull. Reclaimed afterwards.
+
+**Revisit only if the demo machine has 32 GB+.** The model is already downloaded
+and `eval/ocr_bench.py --engine 'mere.run vision ocr {img}'` will benchmark it
+unchanged.
+
+### OCR engines — three-way benchmark, portable candidates included
+
+Run because an Apple-only tool layer contradicts a model-agnostic product. Same
+18 pages, same ground truth, same metrics. **NSCER** added: CER with all
+whitespace stripped, to separate "misreads characters" from "drops spaces".
+
+| Engine | CER | WER | BER | NSCER |
+|---|---|---|---|---|
+| **apple-vision** | **26.9%** | **28.3%** | **20.1%** | **26.2%** |
+| tesseract | 27.8% | 32.7% | 31.6% | 27.5% |
+| rapidocr | 54.5% | 85.3% | 97.1% | 47.6% |
+
+**RapidOCR is out, and NSCER is what ruled it out.** It ships only the *Chinese*
+PP-OCRv4 recogniser, which emits `26DavisDrive` / `January11,2017` because Chinese
+has no inter-word spaces. The hypothesis was that NSCER would land near Apple's,
+making it a swap-the-recogniser fix. It came in at **47.6% vs Apple's 26.2%** —
+nearly double. Character recognition itself is bad on English government
+documents, so the space defect was the lesser problem.
+
+**Tesseract is a credible portable fallback** — within 1 point of Apple on CER,
+though clearly worse on BER (31.6% vs 20.1%), meaning it mangles more whole words.
+50 MB, installs anywhere.
+
+Worth keeping: both alternatives **beat** Apple on the form pages
+(`IRS-4835-1` 0.996 → 0.766 Tesseract / 0.876 RapidOCR; `NRCS-1` improved for
+both). That's Apple's reading-order collapse showing. But forms are read via
+AcroForm, so the advantage is worth ~nothing to this product.
+
+**Untested**, if a stronger portable backend is ever wanted: RapidOCR with an
+*English* recogniser, and PaddleOCR PP-Structure (layout-aware, aimed squarely at
+the reading-order weakness). Neither changes the macOS answer.
 
 ---
 
@@ -215,10 +292,11 @@ relative-deadline arithmetic, no per-item confidence labels, English/US-UK only.
 
 | # | Question | Why it blocks |
 |---|---|---|
-| 1 | **Download models** — enable Apple Intelligence, or bundle a runtime + GGUF? | Decides the zero-download pitch, and couples to native-vs-cross-platform |
-| 2 | **Export format** — Markdown checklist, CSV, or JSON? | Small, but it's the app's only write |
-| 3 | **Confidence thresholds** — escalate point, amber/red split | Measure against `assets/scans/` and `assets/golden/`, don't guess |
-| 4 | **Page window** — the EPA label is **45 pages**; a 2-page default misses the application rates entirely | Needs a real page-selection strategy, not a constant |
+| 1 | **UI shell — native SwiftUI or Tauri?** `architecture.md` argues native, but that argument rested on Apple-only AI tiers. With a portable tool layer that premise is gone, so Tauri is now genuinely defensible: you rebuild PDF render + annotation on pdf.js, and get Windows/Linux with no Apple dependency anywhere. Native is still faster for the hackathon. | Decides the whole frontend |
+| 2 | **Demo hardware** — this 16 GB Air, or something with 32 GB+? | Decides whether any local model tier is possible at all, and whether mere.run is worth revisiting |
+| 3 | **Export format** — Markdown checklist, CSV, or JSON? | Small, but it's the app's only write |
+| 4 | **Confidence thresholds** — escalate point, amber/red split | Measure against `assets/scans/` and `assets/golden/`, don't guess |
+| 5 | **Page window** — the EPA label is **45 pages**; a 2-page default misses the application rates entirely | Needs a real page-selection strategy, not a constant |
 
 Distribution to pick thresholds against: 1092 real lines, min 0.054, p05 0.342,
 median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
@@ -248,6 +326,14 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | Extraction split in two: deterministic fields, model prose | mine, from measurement |
 | Page/size/format limits and degradation behaviour | mine |
 | Build order above | mine |
+| **mere.run ruled out** — needs 16 GB memory headroom on a 16 GB machine; measured, reproducible | measurement |
+| **RapidOCR rejected** — NSCER 47.6% vs Apple's 26.2%; Chinese recogniser can't read English gov docs | measurement |
+| **OCR: Apple Vision on macOS, Tesseract as portable fallback** — behind one `ocr(image) → [{text, confidence, bbox}]` contract | measurement |
+| **Agent is model-agnostic** — one OpenAI-compatible client, swappable base URL | yours |
+| **Template-only mode withdrawn** — a no-model pipeline misses the AI-agents theme and 25% of the rubric | mine, corrected |
+| **Deterministic tier reframed as the agent's tools**, not a replacement for the agent | mine |
+| Portable tool layer: PyMuPDF/pdfium for PDF+forms, Presidio for future masking | mine |
+| Apple Intelligence is optional, not foundational — device IS eligible (`appleIntelligenceNotEnabled`, not `deviceNotEligible`) | measurement |
 
 ---
 
@@ -262,3 +348,9 @@ Superseded, safe to delete:
 | `agent.py`, `app.py`, `index.html` | Field Log prototype. Worth reading once for the bounded-loop and evidence-quote patterns, then delete. |
 
 Keep: `assets/`, `ocr.swift`, `ocr`, the `spike_*` binaries, `eval/`, `context/`.
+
+`eval/` now holds the full measurement harness — `ocr_bench.py` (any engine, four
+metrics, `--compare`), `engines/rapidocr_run.py` (portable OCR, plain-text and
+`--json` modes matching `ocr.swift`'s shape), `cases.json` + `score.py`
+(reasoning-model scoring with deadline-anchor traps), `openai_run.py` (any
+OpenAI-compatible endpoint).
