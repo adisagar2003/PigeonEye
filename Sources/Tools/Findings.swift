@@ -9,6 +9,29 @@ import Foundation
 //
 // Everything here is a pure function over a Page. No network, no model.
 
+/// What a line is *searched* for, which is deliberately looser than what
+/// validates.
+///
+/// One pattern for both jobs silently drops the findings that matter most: OCR
+/// reads `10.5 0Z` for `10.5 oz` on page 12 of the 45-page label, and a strict
+/// search never sees it — so the user is never told the rate exists, let alone
+/// that its reading is doubtful. Finding it and then failing it is the honest
+/// outcome; discarding it is the app deciding for the reader.
+///
+/// ponytail: the widened classes are the confusions measured in this corpus
+/// (`0`/`O`, `1`/`l`/`I`, `5`/`S`), not a general OCR-error model. A homoglyph
+/// table belongs with 3.2's `topCandidates` signal, which sees the alternatives
+/// directly instead of guessing them.
+private func candidatePattern(for format: Format) -> Regex<Substring> {
+    switch format {
+    // `[o0]` is the measured confusion; the units themselves are matched
+    // case-insensitively because labels shout them (`10.5 OZ`).
+    case .rate: /\b\d{1,4}(?:\.\d{1,2})? ?(?:(?i:fl ?[o0]z|[o0]z|lbs?|gal|pts?|qts?)|%)(?:\s?\/\s?(?i:A|acre))?\b/
+    case .epaRegistration: /\b[\dOolI]{3,5}-[\dOolI]{1,5}\b/
+    default: pattern(for: format)
+    }
+}
+
 /// The regex behind each `Format`. Literals, so a broken pattern is a compile
 /// error rather than a `try!` that fires on the first bad scan.
 private func pattern(for format: Format) -> Regex<Substring> {
@@ -23,7 +46,7 @@ private func pattern(for format: Format) -> Regex<Substring> {
     case .date: /\b(?:\d{1,2}\/\d{1,2}\/\d{2,4}|(?:January|February|March|April|May|June|July|August|September|October|November|December) \d{1,2}, \d{4})\b/
     case .amount: /\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b/
     case .formNumber: /\b(?:CPA|IRS|EPA|SF|OMB)[- ]?\d{3,4}[A-Z]?\b/
-    case .rate: /\b\d{1,4}(?:\.\d{1,2})? ?(?:fl ?oz|oz|lbs?|gal|pts?|qts?|%)(?:\s?\/\s?(?:A|acre))?\b/
+    case .rate: /\b\d{1,4}(?:\.\d{1,2})? ?(?:(?i:fl ?oz|oz|lbs?|gal|pts?|qts?)|%)(?:\s?\/\s?(?i:A|acre))?\b/
     }
 }
 
@@ -62,7 +85,7 @@ public func findings(on page: Page, number: Int) async -> [Finding] {
         let region = line.region
 
         for format in Format.allCases {
-            for match in line.text.matches(of: pattern(for: format)) {
+            for match in line.text.matches(of: candidatePattern(for: format)) {
                 let quote = String(match.output)
                 keep(
                     finding(
@@ -104,8 +127,12 @@ func finding(
     in transcript: String
 ) -> Finding? {
     guard !quote.isEmpty, transcript.contains(quote) else { return nil }
+    // The region is part of the identity: the same words can appear twice on one
+    // page in two places, and two rows sharing an id highlight together and
+    // conflate two source locations.
+    let where_ = region.map { "\($0.x),\($0.y),\($0.width),\($0.height)" } ?? "-"
     return Finding(
-        id: "\(origin.rawValue):\(page):\(label):\(quote)",
+        id: "\(origin.rawValue):\(page):\(label):\(quote):\(where_)",
         label: label, value: value, conf: conf, quote: quote,
         page: page, region: region, validated: validated,
         origin: origin, signals: [], unresolved: false)

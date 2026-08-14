@@ -108,7 +108,57 @@ func epa_registration_numbers_validate_and_garbage_does_not(text: String, valid:
     #expect(found.contains { $0.label.lowercased().contains("date") }, "no date finding")
 }
 
-// MARK: - 5 · Degenerate pages
+// MARK: - 5 · A doubtful reading is shown, not swallowed
+
+/// **The stress case this slice must not fail.** Page 12 of the 45-page label
+/// carries a mix rate, and OCR reads `10.5 0Z` for `10.5 oz`.
+///
+/// Searching with the same strict pattern that validates would mean never
+/// finding it — so the user is never told the rate exists, let alone that its
+/// reading is doubtful. Find it and fail it: the row appears, `validated` is
+/// false, and 3.2 is what turns that into a colour.
+@Test func an_ocr_misread_rate_is_emitted_unvalidated() async {
+    let text = "Apply 10.5 0Z per acre before bloom."
+    let page = Page(
+        transcript: text,
+        lines: [Line(text: text, conf: 0.71, bbox: [0.1, 0.2, 0.8, 0.02], title: false, alts: [])],
+        tables: 0, lists: 0, data: [:])
+
+    let rates = await findings(on: page, number: 12).filter { $0.label == Format.rate.label }
+    let misread = try? #require(rates.first { $0.quote.contains("0Z") })
+
+    #expect(misread != nil, "the misread rate was dropped instead of shown")
+    #expect(misread?.validated == false, "a misread rate was reported as validated")
+    #expect(misread?.page == 12)
+
+    // And the clean spelling still validates, so failing is a verdict and not
+    // the only thing this validator can do.
+    let clean = "Apply 10.5 oz per acre before bloom."
+    let cleanPage = Page(
+        transcript: clean,
+        lines: [Line(text: clean, conf: 0.9, bbox: [0.1, 0.2, 0.8, 0.02], title: false, alts: [])],
+        tables: 0, lists: 0, data: [:])
+    let good = await findings(on: cleanPage, number: 12).filter { $0.label == Format.rate.label }
+    #expect(good.contains { $0.validated == true }, "the correct spelling did not validate")
+}
+
+/// The same words twice on one page in two places are two findings, and two
+/// findings need two identities — otherwise selecting one highlights both and
+/// any consumer keyed on `id` conflates two source locations.
+@Test func the_same_value_in_two_places_gets_two_identities() async {
+    let text = "524-529"
+    func line(_ y: Double) -> Line {
+        Line(text: text, conf: 0.9, bbox: [0.1, y, 0.3, 0.02], title: false, alts: [])
+    }
+    let page = Page(
+        transcript: text, lines: [line(0.2), line(0.6)], tables: 0, lists: 0, data: [:])
+
+    let found = await findings(on: page, number: 1).filter { $0.origin == .validator }
+    #expect(found.count == 2, "two occurrences on different lines collapsed into \(found.count)")
+    #expect(Set(found.map(\.id)).count == 2, "two findings share one id")
+}
+
+// MARK: - 6 · Degenerate pages
 
 /// A page that read as nothing produces nothing, and does not crash reaching for
 /// lines that are not there.

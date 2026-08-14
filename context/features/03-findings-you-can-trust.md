@@ -71,8 +71,29 @@ looked like a registration number — and that string is a real Vision misread f
 this corpus, not a hypothetical. Whole-match is what makes the validator able to
 say no, which is the only reason §12 ranks it the highest-trust signal there is.
 
-Extraction is separate: the same pattern is *searched* across a line to find
-candidates, then each candidate is validated in full.
+### 3.4 Search is looser than validation, and that is the point
+
+Extraction and validation use **different** patterns. One pattern for both jobs
+silently drops the findings that matter most: OCR reads `10.5 0Z` for `10.5 oz`
+on page 12 of the 45-page label, and a strict search never sees it — so the user
+is never told the rate exists, let alone that its reading is doubtful.
+
+Find it, then fail it. The row appears with `validated == false`; turning that
+into a colour is 3.2's job. Discarding it is the app deciding for the reader,
+which is the failure `project-overview.md` §9 is written against.
+
+The widened character classes are the confusions measured in *this* corpus
+(`0`/`O`, `1`/`l`/`I`), not a general OCR-error model. A real homoglyph table
+belongs with 3.2's `topCandidates` signal, which sees the alternative readings
+directly instead of guessing them.
+
+### 3.5 There is no second way to build a `Finding`
+
+`Finding` is `Encodable`, not `Codable`, and its initialiser is `package`. A
+public initialiser — or a synthesised `Decodable` — is a second way in with no
+transcript to check against, which would make **I2** a comment rather than a
+rule. Decoding returns when there is an import path that carries the transcript
+with it.
 
 ### 3.3 One construction point, because I2 is not a convention
 
@@ -121,7 +142,8 @@ than throwing: one bad line must not cost the page its other findings.
 | A validator given empty / 12 KB of junk / unicode | Returns false, does not throw. **Tested** — `a_validator_survives_junk`. |
 | The same words twice on one line | One row. "18 months" appears twice in one sentence and both occurrences share a line, so they share a region and nothing tells them apart. Deduplicated on label + value + region. |
 | A page with zero findings | "Nothing found on page N", never blank — the completeness rule. |
-| Page 12 of the 45-page label, where OCR reads `10.5 0Z` for `10.5 oz` | The finding is not dropped. `0Z` fails the `rate` validator, so it is emitted **unvalidated** rather than silently corrected or discarded. Flagging it is 3.2's job. |
+| **The misread rate** — page 12 of the 45-page label, where OCR reads `10.5 0Z` for `10.5 oz` | The finding is not dropped. `0Z` fails the `rate` validator, so it is emitted **unvalidated** rather than silently corrected or discarded. Flagging it is 3.2's job. **Tested** — `an_ocr_misread_rate_is_emitted_unvalidated`. This is why search and validation use *different* patterns (§3.4). |
+| The same words twice on one page in two places | Two findings with two identities. One shared id highlights both rows and conflates two source locations. **Tested** — `the_same_value_in_two_places_gets_two_identities`. |
 
 ---
 

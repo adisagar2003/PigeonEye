@@ -148,7 +148,16 @@ public struct Signal: Codable, Sendable {
     public init(_ name: String, _ value: Double) { self.name = name; self.value = value }
 }
 
-public struct Finding: Codable, Sendable, Identifiable {
+/// One value the reader is willing to show, and the words it came from.
+///
+/// **Encodable, not Codable, and its initialiser is `package`, both on purpose.**
+/// **I2** says every rendered value traces to a verbatim substring of the
+/// transcript, and that is enforced at one construction point in `Tools`. A
+/// public initialiser — or a synthesised `Decodable` — is a second way in that
+/// has no transcript to check against, which would make the guarantee a comment
+/// rather than a rule. Decoding comes back when there is an import path that
+/// carries the transcript with it.
+public struct Finding: Encodable, Sendable, Identifiable {
     public let id: String
     public let label: String
     /// `nil` when present-but-unreadable.
@@ -166,9 +175,11 @@ public struct Finding: Codable, Sendable, Identifiable {
     public let signals: [Signal]
     public let unresolved: Bool
 
-    public init(id: String, label: String, value: String?, conf: Double, quote: String,
-                page: Int, region: Region? = nil, validated: Bool? = nil,
-                origin: Origin, signals: [Signal] = [], unresolved: Bool = false) {
+    /// `package`, so `Tools.finding(…)` stays the only way a `Finding` comes
+    /// into existence and **I2**'s substring check cannot be walked around.
+    package init(id: String, label: String, value: String?, conf: Double, quote: String,
+                 page: Int, region: Region? = nil, validated: Bool? = nil,
+                 origin: Origin, signals: [Signal] = [], unresolved: Bool = false) {
         self.id = id; self.label = label; self.value = value; self.conf = conf
         self.quote = quote; self.page = page; self.region = region
         self.validated = validated; self.origin = origin; self.signals = signals
