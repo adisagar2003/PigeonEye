@@ -1,0 +1,100 @@
+import SwiftUI
+
+// The design system's tokens, from `_ds/industry-.../styles.css`. One home for
+// every colour and type ramp — a hex literal in a view is the duplicate that
+// coding-standards.md §1.1 warns about.
+//
+// Fonts deviate deliberately: the design specifies Barlow and Barlow
+// Condensed, both Google fonts, and downloading or bundling them contradicts
+// the zero-dependency stack (architecture.md §5). The system font at
+// `.width(.condensed)` fills the same typographic role with nothing to fetch.
+
+public enum Ink {
+    public static let bg = Color(hex: 0xF2F2F3)
+    public static let surface = Color(hex: 0xE9E9EA)
+    public static let text = Color(hex: 0x1D1F20)
+    public static let accent = Color(hex: 0x5980A6)
+    public static let divider = Color(hex: 0x1D1F20).opacity(0.16)
+
+    public static let neutral100 = Color(hex: 0xF5F5F8)
+    public static let neutral200 = Color(hex: 0xE7E7EA)
+    public static let neutral300 = Color(hex: 0xD4D4D7)
+    public static let neutral400 = Color(hex: 0xB7B7BA)
+    public static let neutral500 = Color(hex: 0x98989B)
+    public static let neutral600 = Color(hex: 0x7A7A7D)
+    public static let neutral700 = Color(hex: 0x5D5D60)
+    public static let neutral800 = Color(hex: 0x424244)
+    public static let neutral900 = Color(hex: 0x2B2B2D)
+
+    public static let accent100 = Color(hex: 0xEEF6FF)
+    public static let accent200 = Color(hex: 0xD6EBFF)
+    public static let accent300 = Color(hex: 0xB5D9FD)
+    public static let accent400 = Color(hex: 0x94BCE3)
+    public static let accent500 = Color(hex: 0x749DC4)
+    public static let accent600 = Color(hex: 0x597EA3)
+    public static let accent700 = Color(hex: 0x416180)
+    public static let accent800 = Color(hex: 0x2C455D)
+    public static let accent900 = Color(hex: 0x1D2D3D)
+}
+
+public extension Font {
+    /// Barlow Condensed's role: headings, labels, anything set in caps.
+    static func heading(_ size: CGFloat, _ weight: Font.Weight = .bold) -> Font {
+        .system(size: size, weight: weight).width(.condensed)
+    }
+
+    static func body(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        .system(size: size, weight: weight)
+    }
+
+    static func mono(_ size: CGFloat) -> Font {
+        .system(size: size, design: .monospaced)
+    }
+}
+
+public extension Color {
+    init(hex: UInt32) {
+        self.init(.sRGB,
+                  red: Double((hex >> 16) & 0xFF) / 255,
+                  green: Double((hex >> 8) & 0xFF) / 255,
+                  blue: Double(hex & 0xFF) / 255)
+    }
+}
+
+// MARK: - The blueprint frame
+
+/// Square, hairline-bordered, with registration marks outside each corner.
+/// Components in this system are wireframe objects, not cards.
+public struct Blueprint: ViewModifier {
+    var stroke: Color
+    var marks: Color
+
+    public func body(content: Content) -> some View {
+        content
+            .overlay(Rectangle().stroke(stroke, lineWidth: 1))
+            .overlay(alignment: .topLeading) { mark(flipX: false, flipY: false) }
+            .overlay(alignment: .topTrailing) { mark(flipX: true, flipY: false) }
+            .overlay(alignment: .bottomLeading) { mark(flipX: false, flipY: true) }
+            .overlay(alignment: .bottomTrailing) { mark(flipX: true, flipY: true) }
+    }
+
+    private func mark(flipX: Bool, flipY: Bool) -> some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle().fill(marks).frame(width: 1, height: 11).offset(x: 5)
+            Rectangle().fill(marks).frame(width: 11, height: 1).offset(y: 5)
+        }
+        .frame(width: 11, height: 11)
+        .offset(x: flipX ? 6 : -6, y: flipY ? 6 : -6)
+    }
+}
+
+public extension View {
+    func blueprint(stroke: Color = Ink.divider, marks: Color = Ink.text.opacity(0.55)) -> some View {
+        modifier(Blueprint(stroke: stroke, marks: marks))
+    }
+
+    /// Uppercase label set in the heading face, as the design uses everywhere.
+    func kicker(_ size: CGFloat = 10, tracking: CGFloat = 0.9, color: Color = Ink.accent700) -> some View {
+        font(.heading(size)).tracking(tracking).textCase(.uppercase).foregroundStyle(color)
+    }
+}

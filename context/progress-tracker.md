@@ -14,31 +14,47 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
-**Spikes done, nothing built.** Every open question that could be answered by
-measurement has been measured. Layer 1 of the build order has not started.
+**F1 built and green.** The app opens a PDF or a scan, renders it, OCRs every
+page and shows the transcript — locally, with no Gate layer in the package at
+all. 14 tests pass. F2 has not started.
 
 ---
 
 ## Build order
 
-Layers, inside out. Each tested before the next starts. Layers 1–3 have no model
-dependency, so they're testable now.
+**Vertical slices, not layers.** The old table was horizontal — nothing rendered
+until stage 7. The working order is the feature list in `issues.md`, and each
+feature has a spec under `context/features/`. One source of truth, per
+`coding-standards.md` §1.1.
 
-| # | Layer | Done when | Status |
+| # | Feature | Spec | Status |
 |---|---|---|---|
-| 1 | `ocr.swift` emits regions + confidence as JSON | Real scan → JSON with bboxes, asserted in a test | spike works, no test |
-| 2 | Format validators (EPA reg no., dates, amounts, form numbers) | Table-driven test over known-good and known-bad strings | not started |
-| 3 | Output contract types + `quote ⊂ transcript` check | A fabricated quote fails a test | not started |
-| 4 | Local extraction → findings | Tier 1 + tier 2 filled on the EPA fixture, no cloud call | not started |
-| 5 | Confidence composite + gate | Known-bad region scores red and is selected for escalation | not started |
-| 6 | Crop + cloud escalation + merge | Only selected crops leave; merged result marked escalated | not started |
-| 7 | Consumer UI | The three demo fixtures render correctly | not started |
-| 8 | Inspector UI | Step log, signals, escalations all visible | not started |
-| 9 | Ask/skip branch | Skip still produces a rendered result | not started |
+| F1 | Read it locally | [`features/01-read-it-locally.md`](features/01-read-it-locally.md) | **complete** |
+| F2 | Form mode | — | not started |
+| F3 | Findings you can trust | — | not started |
+| F4 | Explain it | — | not started |
+| F5 | Escalate with consent | — | not started |
+| F6 | Fail honestly | — | not started |
+| F7 | Inspector mode | — | partial (step log shipped in F1) |
+| F8 | Export | — | not started |
+
+The old stage numbers survive where they are load-bearing: `coding-standards.md`
+§4 maps stages to the tests that must fail first, and F1 covers stage 1.
 
 ---
 
 ## What measurement settled
+
+### F1 — what the build measured
+
+| | |
+|---|---|
+| **Vision cannot read a PDF** | `./ocr <pdf>` → `invalidImage("Zero-dimensioned image (0.0 x 0.0)")`. Rasterisation is mandatory, not a preference. |
+| **Page counts** (`mdls -name kMDItemNumberOfPages`) | EPA labels are 45, 40, 29, 22, 13, 12. Four of six are over 20 pages — long documents are the normal case. |
+| **45 pages, render + OCR, end to end** | **23.3s** wall, debug build, 6 pages in flight (`reading_a_pdf_produces_a_transcript_and_a_page_count`). The 14.9s figure below is OCR-only over pre-rendered JPEGs, so rasterisation costs roughly 8s of it. |
+| **The origin flip is load-bearing, and now proven** | Reverted to Vision's lower-left origin on purpose: the letterhead read `y = 0.9375` instead of `0.046`, and a crop of the *last* line on the page came back as `"january 11, 2017"` — the mirrored position at the top. That is F5 sending a region the user never approved, and it is caught by one test. |
+| **The seal misread reproduces** | `WEAL PROTECTED` at conf **0.08** on `007969-00242-...-01.jpg`, matching the 0.062 recorded below. The low end of Vision's confidence is trustworthy. |
+| **The CLI contract survived the move** | `tools.py` still reports 45 pages, a 1,426-token index at 32/page against 32,394 tokens of full text — identical to the numbers below. |
 
 ### OCR — Apple Vision is the local tier
 
@@ -301,6 +317,7 @@ relative-deadline arithmetic, no per-item confidence labels, English/US-UK only.
 | 3 | **Export format** — Markdown checklist, CSV, or JSON? | Small, but it's the app's only write |
 | 4 | **Confidence thresholds** — escalate point, amber/red split | Measure against `assets/scans/` and `assets/golden/`, don't guess |
 | 5 | **Page window** — the EPA label is **45 pages**; a 2-page default misses the application rates entirely | Needs a real page-selection strategy, not a constant |
+| 6 | **Wording of the import-time disclosure** in cloud tier, and whether declining it leaves a usable offline run or refuses the document outright | It is now the *only* consent moment in cloud tier, so it carries the whole trust story |
 
 Distribution to pick thresholds against: 1092 real lines, min 0.054, p05 0.342,
 median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
@@ -330,6 +347,13 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | Extraction split in two: deterministic fields, model prose | mine, from measurement |
 | Page/size/format limits and degradation behaviour | mine |
 | Build order above | mine |
+| **Vertical slices replace the layer build order**; features live in `context/features/` | yours |
+| **OCR every page, always** — no text-layer shortcut for born-digital PDFs. One pipeline, and the OCR errors it introduces are what the confidence gate exists to catch | yours |
+| **PDF, PNG and JPEG** can be imported; images skip rasterisation entirely | yours |
+| **SwiftPM, no Xcode project** — `swift build` / `swift test` run headless. No app bundle, so a Keychain in F5 falls back to an env var | yours |
+| **The PigeonEye Reader v3 design is a proposal, `context/` is the source of truth.** Where they disagree the design element is not built | yours |
+| App named **PigeonEye** | yours |
+| Confidence cut-points 0.85 / 0.60 / 0.45 carried as named placeholders in `Thresholds` until open question 3 measures them | mine |
 | **mere.run ruled out** — needs 16 GB memory headroom on a 16 GB machine; measured, reproducible | measurement |
 | **RapidOCR rejected** — NSCER 47.6% vs Apple's 26.2%; Chinese recogniser can't read English gov docs | measurement |
 | **OCR: Apple Vision on macOS, Tesseract as portable fallback** — behind one `ocr(image) → [{text, confidence, bbox}]` contract | measurement |
@@ -338,6 +362,10 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Deterministic tier reframed as the agent's tools**, not a replacement for the agent | mine |
 | Portable tool layer: PyMuPDF/pdfium for PDF+forms, Presidio for future masking | mine |
 | Apple Intelligence is optional, not foundational — device IS eligible (`appleIntelligenceNotEnabled`, not `deviceNotEligible`) | measurement |
+| **The crop-consent gate is conditional on the reasoning tier** — live per-crop in local tier, absent in cloud tier where consent is taken once at import. Asking to send a crop after the transcript has already gone to the same endpoint is theatre, and reads as false assurance about everything else | yours |
+| **Escalations stay visible even with the prompt gone** — every escalated value is marked escalated, and inspector mode still shows what was sent where | mine |
+| **The no-network claim is scoped to the local tier, and the tier is disclosed at import** — not in settings, not in a tooltip | yours |
+| I1 and Boundary C in `architecture.md` reworded to be tier-conditional; the single-egress-function rule is unchanged in both tiers | consequence of the above |
 
 ---
 
@@ -351,7 +379,15 @@ Superseded, safe to delete:
 | `fixtures/` | Synthetic letters. `assets/` + `degrade.sh` are real documents degraded realistically — strictly better. |
 | `agent.py`, `app.py`, `index.html` | Field Log prototype. Worth reading once for the bounded-loop and evidence-quote patterns, then delete. |
 
-Keep: `assets/`, `ocr.swift`, `ocr`, the `spike_*` binaries, `eval/`, `context/`.
+Keep: `assets/`, `Sources/`, `Tests/`, `ocr` (the built CLI, refreshed with
+`swift build -c release && cp .build/release/ocr ./ocr`), the `spike_*`
+binaries, `eval/`, `context/`.
+
+`ocr.swift` is gone from the root — it moved to `Sources/Tools/OCR.swift` in F1
+and its layer-1 exemption died with the move (`coding-standards.md` §1). Its
+`--json` output is unchanged except `bbox`, which is now
+`[x, y, width, height]` upper-left rather than `[minX, minY, maxX, maxY]`
+lower-left. Nothing read `bbox` (checked), and one origin everywhere is **I12**.
 
 `eval/` now holds the full measurement harness — `ocr_bench.py` (any engine, four
 metrics, `--compare`), `engines/rapidocr_run.py` (portable OCR, plain-text and
