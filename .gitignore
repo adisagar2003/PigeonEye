@@ -2,11 +2,11 @@
 .venv/
 __pycache__/
 
-# compiled swift binaries
+# compiled swift binaries — built to the root because eval/ and spikes/ shell
+# out to ./ocr and ./spike_fm. Sources live in Sources/ and spikes/.
 ocr
 spike_fm
 spike_form
-spike_vision
 .DS_Store
 
 # golden eval datasets — 157 MB, refetch with assets/golden/fetch.sh

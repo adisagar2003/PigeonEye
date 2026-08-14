@@ -2,7 +2,8 @@
 // PDFKit? If yes, "required fields to fill" + "jump to page" come free with
 // exact page index and rect - no OCR, no ML, no heuristics.
 //
-//   swiftc -O spike_form.swift -o spike_form && ./spike_form assets/gov-forms/*.pdf
+//   swiftc -O spikes/spike_form.swift -o spike_form
+//   ./spike_form assets/gov-forms/*.pdf
 import Foundation
 import PDFKit
 

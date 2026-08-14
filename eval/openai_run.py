@@ -52,7 +52,8 @@ def ocr(scan: str) -> str:
     """Run the project's local OCR so both candidates see identical input."""
     binary = ROOT / "ocr"
     if not binary.exists():
-        sys.exit("build the OCR tool first: swiftc -O ocr.swift -o ocr")
+        sys.exit("build the OCR tool first: "
+                 "swift build -c release && cp .build/release/ocr ./ocr")
     r = subprocess.run([str(binary), str(ROOT / scan)],
                        capture_output=True, text=True)
     if not r.stdout.strip():

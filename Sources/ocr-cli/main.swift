@@ -5,7 +5,7 @@
 //   ./ocr assets/scans/*.jpg            # plain transcript, one page after another
 //   ./ocr --json assets/scans/*.jpg     # JSON array, one object per page
 //
-// tools.py and eval/ shell out to ./ocr and read this JSON, so its shape is a
+// spikes/page_index.py and eval/ shell out to ./ocr and read this JSON, so its shape is a
 // contract. The logic lives in Sources/Tools — this file is argv and stdout.
 //
 // CHANGED in F1: `bbox` is now `[x, y, width, height]` with an **upper-left**

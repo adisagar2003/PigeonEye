@@ -54,7 +54,7 @@ The old stage numbers survive where they are load-bearing: `coding-standards.md`
 | **45 pages, render + OCR, end to end** | **23.3s** wall, debug build, 6 pages in flight (`reading_a_pdf_produces_a_transcript_and_a_page_count`). The 14.9s figure below is OCR-only over pre-rendered JPEGs, so rasterisation costs roughly 8s of it. |
 | **The origin flip is load-bearing, and now proven** | Reverted to Vision's lower-left origin on purpose: the letterhead read `y = 0.9375` instead of `0.046`, and a crop of the *last* line on the page came back as `"january 11, 2017"` — the mirrored position at the top. That is F5 sending a region the user never approved, and it is caught by one test. |
 | **The seal misread reproduces** | `WEAL PROTECTED` at conf **0.08** on `007969-00242-...-01.jpg`, matching the 0.062 recorded below. The low end of Vision's confidence is trustworthy. |
-| **The CLI contract survived the move** | `tools.py` still reports 45 pages, a 1,426-token index at 32/page against 32,394 tokens of full text — identical to the numbers below. |
+| **The CLI contract survived the move** | `spikes/page_index.py` still reports 45 pages, a 1,426-token index at 32/page against 32,394 tokens of full text — identical to the numbers below. |
 
 ### OCR — Apple Vision is the local tier
 
@@ -366,28 +366,51 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Escalations stay visible even with the prompt gone** — every escalated value is marked escalated, and inspector mode still shows what was sent where | mine |
 | **The no-network claim is scoped to the local tier, and the tier is disclosed at import** — not in settings, not in a tooltip | yours |
 | I1 and Boundary C in `architecture.md` reworded to be tier-conditional; the single-egress-function rule is unchanged in both tiers | consequence of the above |
+| **The root is an allowlist, checked by `scripts/layers.sh`** — a root file has no directory, so no layer, so no import rule. Code with a layer goes in `Sources/`, prototypes in `spikes/`, and every spike header names the slice that deletes it | yours, enforced by mine |
+| **`eval/` stays Python and stays at the root level** — it is measurement, not a layer, and `assets/golden/` + the four metrics have no Swift equivalent worth writing | mine |
 
 ---
 
 ## Repo state
 
-Superseded, safe to delete:
+**The root is now an allowlist, and a grep enforces it** (`coding-standards.md`
+§1.0, fifth check in `scripts/layers.sh`). Reasoning: a file's layer is its
+directory, so a root-level file has no layer and no import rule — the exemption
+`ocr.swift` held was the mechanism, and it was spent, not renewed.
+
+Deleted, all of them named as superseded in this table since before F1:
 
 | Path | Why |
 |---|---|
-| `spike.py` | Written before any spec; assumes a cloud-first model and a fixed schema. Both void. |
+| `spike.py` | Written before any spec; assumed a cloud-first model and a fixed schema. Both void. |
 | `fixtures/` | Synthetic letters. `assets/` + `degrade.sh` are real documents degraded realistically — strictly better. |
-| `agent.py`, `app.py`, `index.html` | Field Log prototype. Worth reading once for the bounded-loop and evidence-quote patterns, then delete. |
+| `agent.py`, `app.py`, `index.html` | Field Log prototype. The bounded-loop and evidence-quote patterns were read out of it first; both live in `Sources/Agent/Reader.swift` and **I2** now. |
+| `spike_vision.swift` | Superseded by `Sources/Tools/OCR.swift` — same `RecognizeDocumentsRequest`, plus the I12 flip the spike never did. Its binary went with it. |
 
-Keep: `assets/`, `Sources/`, `Tests/`, `ocr` (the built CLI, refreshed with
-`swift build -c release && cp .build/release/ocr ./ocr`), the `spike_*`
-binaries, `eval/`, `context/`.
+Moved to `spikes/`, because each still has a job and none has earned a layer:
+
+| Path | Job, and what kills it |
+|---|---|
+| `spikes/spike_fm.swift` | Foundation Models runner; `eval/score.py` pipes `./ocr \| ./spike_fm`. Dies at slice 4.3, when the local tier is decided. |
+| `spikes/spike_form.swift` | AcroForm field dump. Dies when F2 builds `listFormFields` in `Sources/Tools`. |
+| `spikes/page_index.py` | Was `tools.py`. The page index — 45 pages as a **1,426-token** index at 32/page against **32,394** tokens of full text, re-measured after the move. Dies at slice 4.2, when `Sources/Agent` grows chunk selection in Swift. |
+
+Keep: `assets/`, `Sources/`, `Tests/`, `spikes/`, `scripts/`, `eval/`, `context/`,
+and `ocr` — the built CLI, refreshed with
+`swift build -c release && cp .build/release/ocr ./ocr`.
 
 `ocr.swift` is gone from the root — it moved to `Sources/Tools/OCR.swift` in F1
 and its layer-1 exemption died with the move (`coding-standards.md` §1). Its
 `--json` output is unchanged except `bbox`, which is now
 `[x, y, width, height]` upper-left rather than `[minX, minY, maxX, maxY]`
 lower-left. Nothing read `bbox` (checked), and one origin everywhere is **I12**.
+
+Four stale build commands died with it, found by grepping for the deleted
+filename rather than by reading: `CLAUDE.md`, `eval/openai_run.py`'s
+"build the OCR tool first" exit, `spikes/page_index.py`'s `FileNotFoundError`,
+and `eval/engines/rapidocr_run.py`'s docstring all still said
+`swiftc -O ocr.swift -o ocr`. **A deletion is not done until the strings that
+name the deleted thing are gone too.**
 
 `eval/` now holds the full measurement harness — `ocr_bench.py` (any engine, four
 metrics, `--compare`), `engines/rapidocr_run.py` (portable OCR, plain-text and
