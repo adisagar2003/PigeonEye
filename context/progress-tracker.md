@@ -472,8 +472,11 @@ Moved to `spikes/`, because each still has a job and none has earned a layer:
 | `spikes/page_index.py` | Was `tools.py`. The page index — 45 pages as a **1,426-token** index at 32/page against **32,394** tokens of full text, re-measured after the move. Dies at slice 4.2, when `Sources/Agent` grows chunk selection in Swift. |
 
 Keep: `assets/`, `Sources/`, `Tests/`, `spikes/`, `scripts/`, `eval/`, `context/`,
-and `ocr` — the built CLI, refreshed with
-`swift build -c release && cp .build/release/ocr ./ocr`.
+and `ocr` — a **tracked launcher script** (`exec swift run ... ocr "$@"`), not a
+copied binary, because `eval/` and `spikes/page_index.py` invoke `./ocr` and a
+fresh clone had nothing at that path. `scripts/cli-contract.sh` checks its
+`--json` shape; F1 named that contract in its acceptance criteria and never
+checked it.
 
 `ocr.swift` is gone from the root — it moved to `Sources/Tools/OCR.swift` in F1
 and its layer-1 exemption died with the move (`coding-standards.md` §1). Its

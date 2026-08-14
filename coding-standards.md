@@ -51,6 +51,7 @@ an allowlist rather than a judgement call:
 |---|---|
 | `Package.swift` (SwiftPM demands it), `.gitignore` | Code with a layer → `Sources/<Layer>/` |
 | Entry-point docs: `CLAUDE.md`, `AGENTS.md`, `README.md`, `ai-workflow.md`, `coding-standards.md`, `issues.md` | A prototype that has not earned a layer → `spikes/` |
+| `ocr` — the CLI launcher. An *entry point*, not logic: four lines that `exec swift run`. Its layer lives in `Sources/ocr-cli`. | Anything with behaviour worth testing |
 
 `spikes/` is where a measurement lives before its answer is recorded. Each spike
 names, in its header, the layer it is destined for and the slice that kills it —

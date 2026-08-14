@@ -40,7 +40,8 @@ class Doc:
             raise FileNotFoundError(self.pdf)
         if not OCR.exists():
             raise FileNotFoundError(
-                f"{OCR} - build it: swift build -c release && cp .build/release/ocr ./ocr")
+                f"{OCR} is missing - it is a tracked launcher script, so this means "
+                "a broken checkout, not a missing build")
 
         self._dir = Path(tempfile.mkdtemp(prefix="gdr-"))
         atexit.register(shutil.rmtree, self._dir, ignore_errors=True)

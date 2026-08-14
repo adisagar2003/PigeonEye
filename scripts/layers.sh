@@ -29,7 +29,7 @@ check "no egress outside Gate"    'URLSession\|http'   'Gate'
 # live in spikes/. Build artifacts are gitignored and so never enumerated here.
 strays=$(git ls-files --cached --others --exclude-standard | grep -v / | grep -vxF \
     -e .gitignore -e AGENTS.md -e CLAUDE.md -e Package.swift -e README.md \
-    -e ai-workflow.md -e coding-standards.md -e issues.md)
+    -e ai-workflow.md -e coding-standards.md -e issues.md -e ocr)
 if [ -n "$strays" ]; then
     echo "FAIL  root holds only entry-point docs"
     echo "$strays" | sed 's/^/        /'

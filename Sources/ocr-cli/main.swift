@@ -1,7 +1,7 @@
 // Apple Vision OCR, as a command. Ships with macOS 26+, runs on the Neural
 // Engine, nothing to download.
 //
-//   swift build -c release && cp .build/release/ocr ./ocr
+//   ./ocr <image...>                     # the tracked launcher at the repo root
 //   ./ocr assets/scans/*.jpg            # plain transcript, one page after another
 //   ./ocr --json assets/scans/*.jpg     # JSON array, one object per page
 //

@@ -4,7 +4,7 @@ __pycache__/
 
 # compiled swift binaries — built to the root because eval/ and spikes/ shell
 # out to ./ocr and ./spike_fm. Sources live in Sources/ and spikes/.
-ocr
+# `ocr` is a tracked launcher script, not a build artifact — see the file.
 spike_fm
 spike_form
 .DS_Store
