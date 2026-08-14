@@ -34,7 +34,26 @@ Two properties, both load-bearing:
    document is worse than no date. Every value carries a confidence reading and
    the verbatim words it came from.
 
+### 3.1 Which configuration you're running
+
+Property 1 is a claim about the **local configuration**, and that configuration
+is the product. On a machine with a local reasoning model, nothing leaves —
+full stop.
+
+On a machine without one, the app falls back to a configured OpenAI-compatible
+endpoint. This is the demo machine's situation today: Apple Intelligence is off,
+so the fallback is what the demo runs on.
+
+**The user is told which one they're in, at import, before anything is read.**
+Not in settings, not in a tooltip — on the screen where the document lands. A
+fallback the user has to discover is the same as a lie.
+
 ## 4. Core user flow
+
+The flow has two shapes, and **which one runs is decided by the reasoning tier,
+not by a setting the user hunts for.**
+
+**Local tier — the crop gate is live:**
 
 ```
 import PDF  →  read it locally  →  results
@@ -44,6 +63,39 @@ import PDF  →  read it locally  →  results
                             → allow: send just that crop, merge the answer
                             → skip:  mark it unresolved, keep going
 ```
+
+**Cloud tier — no per-crop gate:**
+
+```
+import PDF  →  "this document is read using <endpoint>"  →  read  →  results
+                     │
+                     └─ region too unclear?
+                            → send the crop, merge the answer, mark it escalated
+```
+
+### 4.1 Why the gate disappears when the tier is cloud
+
+Because it would be theatre. If the reasoning tier is an OpenAI-compatible
+endpoint, the document's text is already going there to be summarised. Stopping
+to ask permission for a 200×80 crop of a page whose full transcript was sent a
+second earlier does not protect anything — it performs protection, which is
+worse than not having the gate, because the user reads the prompt as evidence
+that everything *else* stayed home.
+
+So the conditional is on the tier, not the confidence:
+
+| Reasoning tier | Low-confidence region |
+|---|---|
+| **Local** | Show the exact crop. Ask. Allow → send only that crop. Skip → mark unresolved. |
+| **Cloud** | Escalate inside the consent already given at import. No second prompt. |
+
+Two things this does **not** change:
+
+- **Consent still exists** — it moved to import time, where it now covers the
+  honest scope ("this document will be read using X") instead of a narrow one.
+- **Escalations are still visible.** Every escalated value is marked as escalated
+  in the result, and inspector mode still shows exactly what was sent where. The
+  prompt is gone; the disclosure is not.
 
 The default path never touches the network. Escalation is an exception the user
 authorises per document, not a mode or a setting.

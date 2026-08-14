@@ -35,6 +35,11 @@ public enum Ink {
     public static let accent700 = Color(hex: 0x416180)
     public static let accent800 = Color(hex: 0x2C455D)
     public static let accent900 = Color(hex: 0x1D2D3D)
+
+    /// How far a control dims while held. The design system has no pressed
+    /// state, so this is the one place that decides — a literal inside a
+    /// button style is the duplicate §1.1 warns about.
+    public static let pressedOpacity = 0.55
 }
 
 public extension Font {
@@ -99,7 +104,7 @@ public struct Flat: ButtonStyle {
     public func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .contentShape(Rectangle())
-            .opacity(configuration.isPressed ? 0.55 : 1)
+            .opacity(configuration.isPressed ? Ink.pressedOpacity : 1)
     }
 }
 
