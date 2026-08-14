@@ -17,16 +17,33 @@ rule can only be checked by taste, it isn't a rule, it's a preference.
 
 Five layers. **Imports point down only.** No layer imports a layer above it, ever.
 
-| # | Layer | What lives here | May import |
-|---|---|---|---|
-| 0 | **Contracts** | `Line`, `Finding`, `Confidence`, `Region`, `Urgency`, validators, thresholds | nothing project-local |
-| 1 | **Tools** | `ocr`, `listFormFields`, `detectData`, `validate`, `cropRegion` — deterministic, no network | 0 |
-| 2 | **Agent** | planning loop, page selection, chunking, map-reduce over findings | 0, 1 |
-| 3 | **Gate** | consent prompt + the *single* egress function to the cloud | 0, 1 |
-| 4 | **UI** | SwiftUI views, consumer + inspector modes | 0, 2, 3 |
+| # | Layer | Source root | What lives here | May import |
+|---|---|---|---|---|
+| 0 | **Contracts** | `Sources/Contracts/` | `Line`, `Finding`, `Confidence`, `Region`, `Urgency`, `ValidationRule` + result types, thresholds | nothing project-local |
+| 1 | **Tools** | `Sources/Tools/` | `ocr`, `listFormFields`, `detectData`, `validate(_:using:)`, `cropRegion` — deterministic, no network | 0 |
+| 2 | **Agent** | `Sources/Agent/` | planning loop, page selection, chunking, map-reduce over findings | 0, 1 |
+| 3 | **Gate** | `Sources/Gate/` | consent prompt + the *single* egress function to the cloud | 0, 1 |
+| 4 | **UI** | `Sources/UI/` | SwiftUI views, consumer + inspector modes | 0, 2, 3 |
 
-Checkable: no `import Vision` outside layer 1; no `URLSession`/`http` outside
-layer 3; no SwiftUI type below layer 4. One grep each, run them in review.
+**A file's layer is its directory, not a reviewer's judgement.** That makes the
+rule mechanical:
+
+```sh
+rg -l 'import Vision'      Sources | grep -v '^Sources/Tools/'    # must be empty
+rg -l 'URLSession|http'    Sources | grep -v '^Sources/Gate/'     # must be empty
+rg -l 'import SwiftUI'     Sources | grep -v '^Sources/UI/'       # must be empty
+```
+
+Run them in review. Move them into CI the day CI exists — three greps don't
+need a script to be enforceable.
+
+`ocr.swift` at the repo root is a **layer-1 spike, exempt until layer 1 starts**;
+moving it to `Sources/Tools/` is the first task of that layer, and the exemption
+dies with it. No other root-level file gets that grace.
+
+Validation is split on purpose and only one way: **rules and result types in
+Contracts, the deterministic implementations in Tools.** Agent and UI consume the
+shared result types and never re-implement a check.
 
 **Separation of concerns** means each layer has exactly one reason to change:
 
@@ -140,15 +157,19 @@ Bug fixes are the same loop: first a test that reproduces the bug and fails, the
 the fix. A fix without a reproducing test is a fix that comes back.
 
 **The invariant table is the test list.** `architecture.md` §8 (I1–I13) was written
-to be executable. No layer is "done" until its invariants have tests:
+to be executable. No build-order stage is "done" until its invariants have tests.
 
-| Layer | Test that must fail first |
-|---|---|
-| 1 OCR | real scan → JSON with bboxes; a flipped-origin fixture fails (I12) |
-| 2 Validators | table-driven: known-good and known-bad EPA reg numbers, dates, amounts |
-| 3 Contract | a fabricated quote fails the `quote ⊂ transcript` assertion (I2) |
-| 5 Composite | a known-bad region scores red and is selected (I3, I4) |
-| 6 Egress | a payload containing anything outside the approved crop set fails (I1) |
+Note the two numbering schemes are different and both are load-bearing: **stages**
+are the build order in `progress-tracker.md` (1–9, the order things get built);
+**layers** are §1 above (0–4, what may import what).
+
+| Build-order stage | Architecture layer(s) | Test that must fail first |
+|---|---|---|
+| 1 OCR | Tools | real scan → JSON with bboxes; a flipped-origin fixture fails (I12) |
+| 2 Validators | Contracts (rules) + Tools (impl) | table-driven: known-good and known-bad EPA reg numbers, dates, amounts |
+| 3 Output contract | Contracts | a fabricated quote fails the `quote ⊂ transcript` assertion (I2) |
+| 5 Composite + gate | Contracts + Gate | a known-bad region scores red and is selected (I3, I4) |
+| 6 Egress | Gate | a payload containing anything outside the approved crop set fails (I1) |
 
 Rules:
 
@@ -174,14 +195,20 @@ real) and **you at 3am**. Same log stream feeds both.
 
 Every tool call and every agent step, one structured line, stderr:
 
-```
-step=4 tool=ocr_page page=12 ms=412 lines=87 conf_p50=0.61 conf_min=0.09 ok=true
-step=5 tool=escalate crop=p12:r3 bytes=18244 consent=granted ms=1830 ok=true
-step=6 agent=plan pages_selected=[1,2,12] reason=rate_table_detected tokens_in=812
+```text
+step=4 kind=tool     tool=ocr_page  ms=412  ok=true  page=12 lines=87 conf_p50=0.61 conf_min=0.09
+step=5 kind=tool     tool=escalate  ms=1830 ok=true  crop=p12:r3 bytes=18244 consent=granted reason=low_confidence
+step=6 kind=decision agent=plan     ms=3    ok=true  pages_selected=[1,2,12] tokens_in=812 reason=rate_table_detected
+step=7 kind=failure  tool=ocr_page  ms=88   ok=false page=13 input_kind=jpeg input_bytes=51204 error=vision_no_document next=mark_unresolved
 ```
 
-Required on every entry: **step**, **what**, **duration in ms**, **outcome**.
-Anything a human would ask "why did it do that?" about carries a `reason=`.
+**Required on every entry, no exceptions: `step`, `kind`, `ms`, `ok`.**
+`kind` is one of `tool` / `decision` / `gate` / `failure`.
+
+`reason=` is **required** on `decision`, `gate` and `failure` entries — those are
+the ones a human asks "why did it do that?" about. On a `tool` entry it's required
+only when the call isn't mechanically implied by the current plan (an escalation
+is; the fourth page of a sequential read isn't).
 
 Log at minimum:
 
@@ -190,8 +217,11 @@ Log at minimum:
 - every confidence computation — the per-signal breakdown, not just the composite
   (I4 requires it to be *shown*, so it must be *recorded*);
 - every gate interaction — what was offered, what the user chose;
-- every failure — with the input that caused it, and what happened next
-  (retry / fall through / mark unresolved). Never a swallowed error.
+- every failure — **the input's safe metadata only** (`input_kind`, `page`,
+  `region_id`, `input_bytes`, the error), plus `next=` saying what happened
+  (`retry` / `fall_through` / `mark_unresolved`). Never a swallowed error, and
+  never the raw input — see §5.2, which the error path is the most likely place
+  to violate.
 
 ### 5.2 What must never be logged
 
@@ -200,10 +230,22 @@ This is a privacy-first product; the log is the easiest place to break the pitch
 - **No document text, no crops, no page images.** Log `lines=87 chars=2129`, never
   the transcript. Log `crop=p12:r3 bytes=18244`, never the bytes.
 - **No API key**, no key prefix, no key length.
-- **No user file paths** beyond the basename.
+- **No filenames and no paths — not even the basename.** A basename is often the
+  most identifying string in the whole system (`2024-tax-return-jane-doe.pdf`).
+  Use a session-scoped opaque `document_id`; log the extension separately if
+  diagnostics need the format.
+- **No raw error payloads** — no request bodies, no response bodies, no dumped
+  input objects. Log the error *kind*, not the thing that caused it.
 
-Checkable: a test that runs a fixture end-to-end and asserts the captured log
-contains no substring of the transcript longer than ~20 characters.
+Checkable, and this is the enforcement that matters: **the log schema is an
+allowlist of keys**, and anything not on it cannot be logged. One end-to-end test
+over a fixture asserts (a) every emitted event uses only allowlisted keys, and
+(b) no emitted value contains the fixture's transcript text, filename, path, crop
+bytes, or credentials.
+
+A length-based check — "no transcript substring longer than N characters" — is
+**not** sufficient and must not be used as the only guard: it passes happily
+while a document leaks in short fragments, and it says nothing about filenames.
 
 ### 5.3 Performance checks
 
@@ -212,7 +254,7 @@ copy-pasted per call site.
 
 ```swift
 let (lines, ms) = measure { try ocr.recognizeLines(in: image) }
-log(step: n, tool: "ocr_page", ms: ms, count: lines.count)
+log(step: n, kind: .tool, tool: "ocr_page", ms: ms, ok: true, ["page": p, "lines": lines.count])
 ```
 
 Record and watch: OCR ms/page, per-tool-call ms, agent step count per document,
@@ -308,7 +350,8 @@ without changing `context/` is incomplete.
 - [ ] Names read as English at the call site; booleans are assertions.
 - [ ] Every declaration has its one-sentence doc comment.
 - [ ] Any design pattern used is named and justified above the implementation.
-- [ ] Tool calls and decisions are logged with `ms=` and `reason=`.
-- [ ] Log contains no document text, no crop bytes, no key.
+- [ ] Every log entry carries `step`, `kind`, `ms`, `ok`; decisions, gate steps
+      and failures also carry `reason=`.
+- [ ] Log keys are allowlisted; no document text, crop bytes, filename, path or key.
 - [ ] Deliberate shortcuts carry a `ponytail:` comment.
 - [ ] `context/progress-tracker.md` updated if §7 applies.
