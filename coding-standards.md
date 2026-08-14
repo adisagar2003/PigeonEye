@@ -34,12 +34,34 @@ rg -l 'URLSession|http'    Sources | grep -v '^Sources/Gate/'     # must be empt
 rg -l 'import SwiftUI'     Sources | grep -v '^Sources/UI/'       # must be empty
 ```
 
-Run them in review. Move them into CI the day CI exists — three greps don't
-need a script to be enforceable.
+These, plus the root check in §1.0, are `scripts/layers.sh`. Run it before every
+commit; move it into CI the day CI exists.
 
-`ocr.swift` at the repo root is a **layer-1 spike, exempt until layer 1 starts**;
-moving it to `Sources/Tools/` is the first task of that layer, and the exemption
-dies with it. No other root-level file gets that grace.
+```sh
+sh scripts/layers.sh    # exits non-zero naming the offending file
+```
+
+### 1.0 The root is an allowlist
+
+A file's layer is its directory — so a file at the **root** has no directory
+above it, no layer, and therefore no import rule. That is why the root gets a
+an allowlist rather than a judgement call:
+
+| Root holds | Nothing else |
+|---|---|
+| `Package.swift` (SwiftPM demands it), `.gitignore` | Code with a layer → `Sources/<Layer>/` |
+| Entry-point docs: `CLAUDE.md`, `AGENTS.md`, `README.md`, `ai-workflow.md`, `coding-standards.md`, `issues.md` | A prototype that has not earned a layer → `spikes/` |
+| `ocr` — the CLI launcher. An *entry point*, not logic: four lines that `exec swift run`. Its layer lives in `Sources/ocr-cli`. | Anything with behaviour worth testing |
+
+`spikes/` is where a measurement lives before its answer is recorded. Each spike
+names, in its header, the layer it is destined for and the slice that kills it —
+a spike with no death condition is just code at the root with a folder in front
+of it. Build artifacts are gitignored, so they are never enumerated.
+
+The fourth check in `scripts/layers.sh` is the enforcement, and it fails naming
+the stray file. `ocr.swift`'s layer-1 exemption was the last one granted; it
+died when the file became `Sources/Tools/OCR.swift` in F1, and no replacement
+grace exists.
 
 Validation is split on purpose and only one way: **rules and result types in
 Contracts, the deterministic implementations in Tools.** Agent and UI consume the
@@ -275,7 +297,7 @@ tokens in/out per model call, end-to-end ms per document, peak RSS.
 
 Small, enforced, non-negotiable.
 
-- **Comments say *why*, code says *what*.** The header of `ocr.swift` — "…not
+- **Comments say *why*, code says *what*.** The header of `Sources/Tools/OCR.swift` — "…not
   `VNRecognizeTextRequest` because the older API interleaves the columns into
   nonsense" — is the standard. Comments that restate the code get deleted.
 - **Name the design pattern above the implementation.** If a file uses a

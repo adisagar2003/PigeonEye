@@ -42,9 +42,23 @@ without changing `context/` is incomplete (`coding-standards.md` §7).
 
 ## Repo
 
-Swift for the tool and UI layers, Python for evaluation. `ocr.swift` → `ocr` is
-the measured local OCR tier. `eval/` scores any engine or model against real
-ground truth. Superseded files are listed under **Repo state** in the tracker —
-delete them, don't extend them.
+Swift for the tool and UI layers, Python for evaluation. `Sources/Tools/OCR.swift`
+→ the `ocr` CLI is the measured local OCR tier. `eval/` scores any engine or model
+against real ground truth. Superseded files are listed under **Repo state** in the
+tracker — delete them, don't extend them.
 
-Build the OCR binary with `swiftc -O ocr.swift -o ocr`.
+The root holds entry-point docs and `Package.swift`, nothing else — a file at the
+root has no directory, so it has no layer and no import rule. Code with a layer
+lives in `Sources/`; prototypes that have not earned one live in `spikes/`.
+`scripts/layers.sh` enforces both, and is the check to run before any commit.
+
+```sh
+swift build                       # the app and the CLI
+swift test                        # ~25s
+sh scripts/layers.sh              # layer + root-cleanliness greps
+sh scripts/cli-contract.sh        # ./ocr --json still has the shape eval/ parses
+```
+
+`./ocr` is a **tracked launcher script**, not a copied binary — `eval/` and
+`spikes/page_index.py` invoke it, so it has to exist in a fresh clone. Do not
+`cp` a build product over it.

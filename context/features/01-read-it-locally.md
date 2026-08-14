@@ -108,14 +108,14 @@ its SwiftPM target, so the dependency graph enforces it instead of a reviewer.
 | 2 | `Sources/Agent` | `read(fileURL) -> Document` — orchestrates rasterise + OCR, owns the step log |
 | 4 | `Sources/UI` | SwiftUI, design tokens, both screens |
 | — | `Sources/PigeonEye` | app entry |
-| — | `Sources/ocr` | the CLI, so `tools.py` and `eval/` keep working |
+| — | `Sources/ocr-cli` | the CLI, so `spikes/page_index.py` and `eval/` keep working |
 
 Layer 3 (`Gate`) **does not exist yet**, and that is checkable:
 `rg 'URLSession|http' Sources` must return nothing.
 
 `ocr.swift` moves from the repo root into `Sources/Tools/`, and its layer-1
 exemption dies with the move (`coding-standards.md` §1). The compiled `./ocr`
-binary at the root stays — `tools.py`, `eval/openai_run.py` and
+binary at the root stays — `spikes/page_index.py`, `eval/openai_run.py` and
 `eval/ocr_bench.py` all shell out to it — and is refreshed from
 `.build/release/ocr` after a build.
 
@@ -213,7 +213,7 @@ Two rules carried from `coding-standards.md` §4 that bite in this slice:
 - [ ] `Line` lives in `Contracts`, bbox upper-left, asserted against a fixture line of known position
 - [ ] `rg 'import Vision' Sources | grep -v Tools/` empty · same for `SwiftUI`/`UI` and `URLSession`/`Gate`
 - [ ] The source file is opened read-only; there is no write path to it (**I7**)
-- [ ] `./ocr --json` still produces the same shape `tools.py` expects
+- [ ] `./ocr --json` still produces the same shape `spikes/page_index.py` expects
 - [ ] Nothing persists (**I9**) and no document text, filename, path or key reaches a log (`coding-standards.md` §5.2)
 
 ---
