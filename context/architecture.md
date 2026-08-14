@@ -2,7 +2,8 @@
 
 Companion to `context/project-overview.md`. Covers the tech stack (with
 justification against comparable local-first AI apps), system boundaries,
-storage model, and invariants.
+storage model, invariants, the output contract, and the confidence composite.
+Status and open questions live in `context/progress-tracker.md`.
 
 Provenance tags: **[verified]** measured or read from the SDK in this project ·
 **[researched]** from published sources, listed at the bottom ·
@@ -301,7 +302,7 @@ matters. Estimate before calling; split on overflow.
 | FM quality on dense regulatory prose **[untested]** | Forces §3.2 fallback | Spike: 5 chunks from `assets/scans/`, compare against hand-written expected findings |
 | FM latency across many chunks **[untested]** | Demo feels slow | Same spike, measure wall-clock per page |
 | 4096-token limit is **[researched]**, not verified here | I13's threshold could be wrong | SDK exposes `GenerationError.exceededContextWindowSize` but states no number. Confirm empirically once FM runs. |
-| Long documents: the EPA label is **45 pages [measured]** | "first 2 pages" misses the application rates entirely — the whole point of the document | Needs a real page-selection strategy, not a constant. Open question §13.5 in the overview. |
+| Long documents: the EPA label is **45 pages [measured]** | "first 2 pages" misses the application rates entirely — the whole point of the document | Needs a real page-selection strategy, not a constant. Open question 4 in `progress-tracker.md`. |
 | Coordinate-origin mismatch (§8.1) | Wrong region escalated | Fixture assertion at Boundary A |
 | Not a git repo | Invariants undefensible without history | `git init` before layer 1 |
 
@@ -310,7 +311,7 @@ matters. Estimate before calling; split on overflow.
 | Was a risk | Outcome |
 |---|---|
 | `spike_vision.swift` written but never compiled | **Compiled and run.** `swiftc -O` clean, executed over all 18 scans. |
-| Confidence thresholds unmeasured | **Measured** over 1092 lines: min 0.054, median 0.606, max 0.885, 377 distinct values. Full analysis in the overview §7.1 — including that the *high* end is untrustworthy (`口` glyphs scored the top four values). |
+| Confidence thresholds unmeasured | **Measured** over 1092 lines: min 0.054, median 0.606, max 0.885, 377 distinct values. Full analysis in §12 — including that the *high* end is untrustworthy (`口` glyphs scored the top four values). |
 | Vision confidence/bbox availability | **Confirmed present**, plus `tables`, `lists`, `detectedData`, `topCandidates`. |
 
 ### 9.1 What the AcroForm finding changes here
@@ -343,6 +344,71 @@ contracts**:
 A later Tauri port then reuses both as sidecars — the shell changes, the AI
 tiers don't. What you must *not* do is thread PDFKit view state or SwiftUI
 types through the extraction logic.
+
+---
+
+## 11. Output contract
+
+Two tiers, so the versatile part stays versatile and the testable part stays
+testable. A fixed `deadline / fee / office` schema fits a campus letter and falls
+apart on an EPA label or a Schedule F.
+
+**Tier 1 — universal core.** Same for every document, typed, validated,
+regression-testable across all families:
+
+| Field | Type | Notes |
+|---|---|---|
+| `doc_type` | string | "EPA labeling notification", "IRS farm profit/loss form" |
+| `what_it_is` | string | one sentence, plain language |
+| `summary` | list[string] | 3–5 bullets |
+| `urgency` | enum | `act_now` \| `soon` \| `informational`, assigned by consequence — not by days remaining, since an EPA label may carry a binding restriction and no date at all |
+| `next_steps` | list[string] | concrete actions, no advice |
+| `pages_read` | (int, int) | surfaced in the UI unconditionally (**I5**) |
+| `findings` | list[Finding] | tier 2 |
+| `transcript` | string | full verbatim OCR text |
+
+**Tier 2 — `Finding`.** An open list, populated per document. This absorbs the
+variety, so adding a document family never means a schema migration:
+
+| Field | Type | Notes |
+|---|---|---|
+| `label` | string | named per document: "Restricted entry interval", "EPA reg. no." |
+| `value` | string \| null | null when present-but-unreadable |
+| `confidence` | float 0–1 | §12 |
+| `quote` | string | verbatim words this came from — **I2** asserts it's a substring of `transcript` |
+| `page` | int | **1-based, required not optional** — click-to-jump depends on it |
+| `region` | bbox \| null | for crop escalation and highlight overlay; one coordinate origin (**I12**, §8.1) |
+| `validated` | bool \| null | did it pass a format validator? |
+| `origin` | enum | `acroform` \| `datadetector` \| `validator` \| `model` — which tier produced it. Drives §12's green rule, and **I3** doesn't apply to `acroform` (§9.1). |
+
+## 12. Confidence composite
+
+A model's self-reported confidence is badly calibrated. If the number in the ring
+is just the model saying "90%", the ring is decoration with a number painted on
+it — worse than the discrete states it replaces, because it looks quantitative.
+
+Signals ranked by how much they can be trusted, **measured over all 18 scans in
+`assets/scans/` (1092 lines)**, not assumed:
+
+| Signal | Trust | Measured behaviour |
+|---|---|---|
+| **Format validators** | highest | Deterministic. EPA reg numbers (`\d{3,5}-\d{2,5}`), dates, amounts, form numbers, rates+units have known shapes. `524-529` validates; `R G-2 26-O4871` does not. |
+| **Vision per-line confidence — low end** | high | Real and useful. The known seal misread `"WEAL PROTEIN"` scored **0.062, 2nd lowest of 1092 lines**. Genuine garbage clusters at the bottom. |
+| **Vision per-line confidence — high end** | **do not trust** | The four *highest* scores in the corpus (0.885, 0.828, 0.824, 0.788) were all `口` — checkbox artifacts read as CJK glyphs. High confidence does not mean correct. |
+| **Homoglyph disagreement in `topCandidates`** | high, and specific | Caught what confidence missed: `"lan Murphy"` scored a mid-range 0.542, but candidate #2 was `"Ian Murphy"` — the correct reading. `l`/`I`, `O`/`0`, `rn`/`m` are exactly the failure mode on reg numbers, names and dates. |
+| **Raw candidate disagreement** | low | Too noisy as a binary — 1024 of 1092 lines have *some* disagreement. Only useful filtered to homoglyph classes. |
+| **Model self-report** | lowest | Tiebreaker only, never the sole input (**I4**). |
+
+Two rules follow, and they are **not symmetrical**:
+
+1. **Low confidence is a reliable trigger.** Below threshold → escalate.
+2. **High confidence is not a licence to show green.** A ring reaches green only
+   if a format validator passed *or* the top candidates agree without a homoglyph
+   substitution. Otherwise it caps at amber, whatever the OCR score.
+
+Without rule 2, the corpus's worst garbage (`口` at 0.885) renders as the most
+confident finding on the page. The inspector shows which signals produced each
+ring.
 
 ---
 
