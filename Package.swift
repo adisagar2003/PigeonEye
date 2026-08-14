@@ -10,7 +10,7 @@ let package = Package(
     platforms: [.macOS("26.0")],
     products: [
         .executable(name: "PigeonEye", targets: ["PigeonEye"]),
-        // Named `ocr` because tools.py and eval/ shell out to ./ocr.
+        // Named `ocr` because spikes/page_index.py and eval/ shell out to ./ocr.
         .executable(name: "ocr", targets: ["OCRCommand"]),
     ],
     targets: [

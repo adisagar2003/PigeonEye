@@ -1,0 +1,13 @@
+#!/bin/sh
+# The `ocr` CLI, as a tracked launcher rather than a copied binary.
+#
+# Why this file exists: eval/, spikes/page_index.py and F1's acceptance criteria
+# all invoke `./ocr`, but the binary is a build artifact and is gitignored — so a
+# fresh clone had nothing at this path and every one of those callers failed on
+# an undocumented manual copy step. A four-line script is tracked, so it is
+# always there.
+#
+# --package-path rather than `cd`, so a relative path argument still resolves
+# against the caller's working directory.
+set -eu
+exec swift run --quiet --package-path "$(dirname "$0")" ocr "$@"
