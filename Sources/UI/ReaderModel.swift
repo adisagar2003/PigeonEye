@@ -25,7 +25,23 @@ public final class ReaderModel {
     public var transcriptOpen = false
     public var inspectorOpen = false
 
-    public init() {}
+    /// True when the page on screen is one that could not be rendered. A failed
+    /// page has no image, and "no image" is otherwise indistinguishable from
+    /// "still rendering" — see `ReaderScreen.pageView`.
+    public var pageFailed: Bool { doc?.failedPages.contains(page) ?? false }
+
+    /// How a document gets read. Injectable for exactly one reason: progress is
+    /// delivered on unstructured tasks, so the only way to test what happens
+    /// when one lands *after* the read has finished is to keep the handler and
+    /// call it late. Production always gets `Agent.read`.
+    private let read: @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
+
+    public init(
+        read: @escaping @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
+            = Agent.read
+    ) {
+        self.read = read
+    }
 
     /// The two fixtures are real documents from `assets/`, opened the same way
     /// the file picker opens anything else. The design's third fixture is a
@@ -86,8 +102,15 @@ public final class ReaderModel {
         do {
             let document = try await read(url) { [weak self] done, total in
                 Task { @MainActor in
-                    guard self?.requestID == id else { return }
-                    self?.phase = .reading(done: done, total: total)
+                    // `requestID` only rejects a *different* open. A progress
+                    // event from *this* read can still be queued on the main
+                    // actor when the read returns, and would then push a
+                    // finished document back to "Reading page…" with nothing
+                    // left running to move it forward. Only a request that is
+                    // still reading may move the bar.
+                    guard let self, self.requestID == id, case .reading = self.phase
+                    else { return }
+                    self.phase = .reading(done: done, total: total)
                 }
             }
             guard requestID == id else { return }

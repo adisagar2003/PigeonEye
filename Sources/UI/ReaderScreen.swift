@@ -218,7 +218,21 @@ public struct ReaderScreen: View {
     private var pageView: some View {
         ScrollView([.vertical, .horizontal]) {
             Group {
-                if let image = model.pageImage {
+                // Checked before the image, because a failed page has no image
+                // and would otherwise fall through to a spinner that never
+                // stops — the toolbar chip says a page failed while the pane
+                // says it is still working (`project-overview.md` §9).
+                if model.pageFailed {
+                    VStack(spacing: 8) {
+                        Text("Page \(model.page) could not be read.")
+                            .font(.heading(14)).tracking(0.6)
+                            .foregroundStyle(Ink.neutral900)
+                        Text("Every other page was read. Move to another page to carry on.")
+                            .font(.body(12)).foregroundStyle(Ink.neutral700)
+                    }
+                    .padding(30)
+                    .blueprint(stroke: Ink.neutral500)
+                } else if let image = model.pageImage {
                     Image(decorative: image, scale: 1)
                         .resizable().aspectRatio(contentMode: .fit)
                         .frame(width: 720 * model.zoom)

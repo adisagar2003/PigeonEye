@@ -476,6 +476,9 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
 | **`Document` reports `failedPages` and reads on** — a damaged page costs that page, never the document | consequence of the F1 review |
 | **Zoom bound and step live in `Contracts.Zoom`** — the bug was the toolbar's step and the model's arithmetic disagreeing | consequence of the F1 review |
+| **Boundary A is deterministic and document-stateless, but not freely parallelisable** — the process-wide Vision gate is part of the contract, so a future caller cannot fan out and rediscover the crash | consequence of the PR #9 review |
+| **Every `ReaderModel` state write is guarded by request *and* phase** — `requestID` alone only rejects a different open; a progress event from the current read could still land after `.ready` | consequence of the PR #9 review |
+| **`ReaderModel` takes its reader as an init parameter** — the only way to test a completion-order race is to hold the progress handler and call it late. Production always gets `Agent.read` | consequence of the PR #9 review |
 
 ---
 
