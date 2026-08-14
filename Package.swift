@@ -20,6 +20,12 @@ let package = Package(
         .target(name: "UI", dependencies: ["Contracts", "Agent"]),     // 4
         .executableTarget(name: "PigeonEye", dependencies: ["UI"]),
         .executableTarget(name: "OCRCommand", dependencies: ["Contracts", "Tools"], path: "Sources/ocr-cli"),
-        .testTarget(name: "PigeonEyeTests", dependencies: ["Contracts", "Tools", "Agent"]),
+        // UI is a test dependency because ReaderModel owns real logic — request
+        // invalidation and the zoom step — and a review found bugs in both.
+        // Fixtures/ is excluded, not declared as a resource: tests resolve it
+        // through #filePath like every other fixture, so a bundle copy would be
+        // a second home for the same file (§1.1).
+        .testTarget(name: "PigeonEyeTests", dependencies: ["Contracts", "Tools", "Agent", "UI"],
+                    exclude: ["Fixtures"]),
     ]
 )

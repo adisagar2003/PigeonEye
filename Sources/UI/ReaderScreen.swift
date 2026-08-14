@@ -1,4 +1,5 @@
 import Agent
+import Contracts
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -133,6 +134,25 @@ public struct ReaderScreen: View {
                     .fixedSize()
             }
 
+            // A damaged page is reported next to the pages-read chip, not only
+            // in the inspector log: the consumer has to know a page is missing
+            // from what they are reading (`features/01-read-it-locally.md` §7).
+            if !doc.failedPages.isEmpty {
+                Text(doc.failedPages.count == 1
+                     ? "page \(doc.failedPages[0]) unreadable"
+                     : "\(doc.failedPages.count) pages unreadable")
+                    .font(.body(10.5)).tracking(0.5).textCase(.uppercase)
+                    // ponytail: no warning hue exists in the token set, and
+                    // inventing one is a design decision context/ has not taken
+                    // (F1 §8). Weight carries it instead — darker text and a
+                    // heavier rule than the `capped` chip beside it.
+                    .foregroundStyle(Ink.neutral900)
+                    .padding(.horizontal, 7).padding(.vertical, 1)
+                    .overlay(Rectangle().stroke(Ink.neutral600, lineWidth: 1))
+                    .fixedSize()
+                    .help("These pages could not be rendered. Everything else was read.")
+            }
+
             Spacer()
 
             step("‹") { model.step(-1) }
@@ -143,11 +163,11 @@ public struct ReaderScreen: View {
 
             Rectangle().fill(Ink.divider).frame(width: 1, height: 16)
 
-            step("−") { model.zoomBy(-0.15) }
+            step("−") { model.zoomBy(-Zoom.step) }
             Text("\(Int((model.zoom * 100).rounded()))%")
                 .font(.body(11.5)).monospacedDigit()
                 .foregroundStyle(Ink.neutral700).frame(minWidth: 38)
-            step("+") { model.zoomBy(0.15) }
+            step("+") { model.zoomBy(Zoom.step) }
         }
         .padding(.horizontal, 12).padding(.vertical, 7)
         .background(Ink.bg)

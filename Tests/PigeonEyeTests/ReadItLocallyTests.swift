@@ -5,6 +5,7 @@ import Testing
 @testable import Agent
 @testable import Contracts
 @testable import Tools
+@testable import UI
 
 // The TDD flow in context/features/01-read-it-locally.md §5, in order.
 // Behaviour through each layer's public surface — never the Vision plumbing
@@ -22,6 +23,13 @@ enum Fixture {
     static let shortLabel = root.appending(path: "assets/epa-labels/007969-00242-20170111.pdf")
     static let scan = root.appending(path: "assets/scans/007969-00242-20170111-01.jpg")
     static let form = root.appending(path: "assets/gov-forms/IRS-ScheduleF-farm-profit-loss.pdf")
+
+    /// Three pages; page 2 has `MediaBox [0 0 0 0]`, so it cannot be rendered
+    /// while 1 and 3 can. Synthetic on purpose — no real document in `assets/`
+    /// has a damaged page, and this is the only way to reach that branch.
+    static let damaged = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appending(path: "Fixtures/damaged-page-2.pdf")
 
     static func temp(_ name: String) -> URL {
         FileManager.default.temporaryDirectory.appending(path: "pigeoneye-test-\(name)")
@@ -193,4 +201,87 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
 @Test func the_log_records_that_nothing_left_the_machine() async throws {
     let doc = try await read(Fixture.scan)
     #expect(doc.log.contains { $0.message == "network calls: 0" })
+}
+
+// MARK: - 10 · Review findings, each red before its fix
+//
+// From the F1 review. Every one of these is a stress case
+// context/features/01-read-it-locally.md §7 already specified and no test
+// covered.
+
+/// §7: "A PDF where page 3 fails to render → Pages 1–2 and 4–51 still read;
+/// page 3 reported, not swallowed." It threw the whole document away instead.
+@Test func one_unrenderable_page_does_not_lose_the_rest() async throws {
+    let doc = try await read(Fixture.damaged)
+
+    #expect(doc.pageCount == 3)
+    #expect(doc.failedPages == [2])
+    // Position is preserved, so page 3 is still index 2 and click-to-jump holds.
+    #expect(doc.pages.count == 3)
+    #expect(doc.pages[0].transcript.contains("PAGE 1"))
+    #expect(doc.pages[2].transcript.contains("PAGE 3"))
+    // Reported, not swallowed.
+    #expect(doc.log.contains { $0.message.contains("page 2") && $0.tag == .flag })
+}
+
+/// The other half of the same rule: a document where *nothing* renders is a
+/// named refusal, not an empty document dressed as success
+/// (`project-overview.md` §9).
+@Test func a_document_whose_every_page_fails_is_still_a_refusal() async throws {
+    let onlyBadPage = Fixture.temp("all-pages-broken.pdf")
+    // The damaged fixture with its two good pages stripped: one 0x0 page.
+    let single = """
+        %PDF-1.4
+        1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+        2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+        3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 0 0] >> endobj
+        trailer << /Size 4 /Root 1 0 R >>
+        %%EOF
+        """
+    try single.write(to: onlyBadPage, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: onlyBadPage) }
+
+    await #expect(throws: (any Error).self) { try await read(onlyBadPage) }
+}
+
+// MARK: - 11 · ReaderModel (layer 4) — request invalidation and zoom
+
+/// 🔥 The critical finding: opening a second file did not invalidate the first
+/// read, so a slower earlier read assigned its Document over the newer one.
+/// The 45-page label takes ~5x the 1-page scan, so the interleaving is reliable.
+@Test @MainActor func a_later_open_wins_over_an_earlier_slower_one() async throws {
+    let model = ReaderModel()
+
+    async let slowFirst: Void = model.open(Fixture.label)   // 45 pages, ~23s
+    async let fastSecond: Void = model.open(Fixture.scan)   // 1 image, ~4s
+    _ = await (slowFirst, fastSecond)
+
+    #expect(model.doc?.url == Fixture.scan, "the earlier, slower read overwrote the newer document")
+    #expect(model.doc?.pageCount == 1)
+}
+
+/// Zoom multiplied the delta by 100 before adding it, so the first click of
+/// either button clamped to the minimum and it never moved again.
+@Test @MainActor func zoom_steps_by_the_delta_it_is_given() {
+    let model = ReaderModel()
+    #expect(model.zoom == 1.0)
+
+    model.zoomBy(0.15)
+    #expect(model.zoom == 1.15)
+    model.zoomBy(0.15)
+    #expect(model.zoom == 1.3)
+    model.zoomBy(-0.15)
+    #expect(model.zoom == 1.15)
+}
+
+@Test @MainActor func zoom_clamps_at_both_ends_without_snapping() {
+    let model = ReaderModel()
+
+    for _ in 0..<20 { model.zoomBy(0.15) }
+    #expect(model.zoom == 1.6)
+    for _ in 0..<20 { model.zoomBy(-0.15) }
+    #expect(model.zoom == 0.7)
+    // And it still steps normally on the way back off the clamp.
+    model.zoomBy(0.15)
+    #expect(model.zoom == 0.85)
 }

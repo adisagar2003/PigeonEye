@@ -14,9 +14,13 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
-**F1 built and green.** The app opens a PDF or a scan, renders it, OCRs every
-page and shows the transcript — locally, with no Gate layer in the package at
-all. 14 tests pass. F2 has not started.
+**F1 built, reviewed and corrected.** The app opens a PDF or a scan, renders it,
+OCRs every page and shows the transcript — locally, with no Gate layer in the
+package at all. 19 tests pass. F2 has not started.
+
+A review of the merged F1 found four defects, all of them in behaviour
+`features/01-read-it-locally.md` §7 had already specified and no test covered.
+Each now has the test that was missing (§ "F1 review" below).
 
 ---
 
@@ -55,6 +59,33 @@ The old stage numbers survive where they are load-bearing: `coding-standards.md`
 | **The origin flip is load-bearing, and now proven** | Reverted to Vision's lower-left origin on purpose: the letterhead read `y = 0.9375` instead of `0.046`, and a crop of the *last* line on the page came back as `"january 11, 2017"` — the mirrored position at the top. That is F5 sending a region the user never approved, and it is caught by one test. |
 | **The seal misread reproduces** | `WEAL PROTECTED` at conf **0.08** on `007969-00242-...-01.jpg`, matching the 0.062 recorded below. The low end of Vision's confidence is trustworthy. |
 | **The CLI contract survived the move** | `tools.py` still reports 45 pages, a 1,426-token index at 32/page against 32,394 tokens of full text — identical to the numbers below. |
+
+### F1 review — four defects, and what they had in common
+
+Every one was a stress case `features/01-read-it-locally.md` §7 already listed.
+The spec was right; the tests stopped short of it. **A stress-test table with no
+test behind it is a wish, not a check** — the F2 lesson is to write §7's rows as
+tests in the same slice, not to trust the prose.
+
+| Defect | Was | Now |
+|---|---|---|
+| A slower earlier `open` overwrote the newer document | No request invalidation in `ReaderModel`; opening the 45-page label then the scan left the *label* on screen | A `requestID` generation token, checked after every `await`. Proven by removing the guard and watching the test fail with the label's URL |
+| One unrenderable page threw the whole document away | `withThrowingTaskGroup` cancels its siblings and unwinds the read | Non-throwing group, per-page outcome, `Document.failedPages`. Every page fails → still a named refusal |
+| `./ocr` missing from a fresh clone | Binary is gitignored; every `eval/` caller needed an undocumented copy | Tracked launcher + `scripts/cli-contract.sh` |
+| Zoom did nothing | `delta * 100` inside the sum, so the first click of *either* button clamped to 0.7 and stayed | `Zoom.stepped(from:by:)` in layer 0, one home for the bound and the step |
+
+**The Vision crash is Apple's, and the bound belongs in `Tools.ocr`.** The
+intermittent segfault recorded earlier now has a stack: `EXC_BAD_ACCESS` in
+`objc_release` inside **TextRecognition**, unwinding a finished request — a
+refcount race in the framework, not in this code. It cannot be fixed here, only
+not provoked.
+
+The mitigation is a process-wide `VisionGate` actor inside `Tools.ocr`, **not**
+a bound in each caller, and the distinction is the whole point: `Agent.read`
+already bounded itself to `Limits.concurrentPages`, and two concurrent reads
+still put twice that in flight. Per-caller bounds compose into no bound. Measured
+after: `swift test` went from crashing roughly 1 run in 3 to 4 consecutive clean
+runs, wall clock unchanged at ~24s.
 
 ### OCR — Apple Vision is the local tier
 
@@ -366,6 +397,9 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Escalations stay visible even with the prompt gone** — every escalated value is marked escalated, and inspector mode still shows what was sent where | mine |
 | **The no-network claim is scoped to the local tier, and the tier is disclosed at import** — not in settings, not in a tooltip | yours |
 | I1 and Boundary C in `architecture.md` reworded to be tier-conditional; the single-egress-function rule is unchanged in both tiers | consequence of the above |
+| **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
+| **`Document` reports `failedPages` and reads on** — a damaged page costs that page, never the document | consequence of the F1 review |
+| **Zoom bound and step live in `Contracts.Zoom`** — the bug was the toolbar's step and the model's arithmetic disagreeing | consequence of the F1 review |
 
 ---
 

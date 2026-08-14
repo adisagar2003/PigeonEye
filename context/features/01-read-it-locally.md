@@ -180,6 +180,12 @@ directory, because SwiftPM does not promise you a cwd.
 | 8 | `the_source_file_is_never_modified` — hash, size and mtime of the input are identical before and after a full read | mtime moved | Read-only open, no write path. **I7** |
 | 9 | `the_step_log_never_contains_the_document` — no log entry contains the filename, the path, or any 20-character substring of the transcript | `entry 3 contains "000524-00529-20241120.pdf"` | Log counts and durations, never content. `coding-standards.md` §5.2 |
 
+**What the F1 review changed about this section.** Four defects shipped, and
+every one of them was already written down in §7 below as a case that "must
+happen" — with no test behind it. The rows were right; the flow stopped at test
+#9 and never turned §7 into assertions. From F2 on, **§7's rows are tests in the
+same slice**, not prose to check by hand.
+
 **Checked by review, not by a test**, because a test would cost more than it
 catches at this size:
 
@@ -208,7 +214,7 @@ Two rules carried from `coding-standards.md` §4 that bite in this slice:
 - [ ] `swift build` produces an app that opens `assets/epa-labels/000524-00529-20241120.pdf`
 - [ ] Every page is rendered and OCR'd; the transcript disclosure shows Vision's reading-order text
 - [ ] `read pages 1–45 of 45` is rendered unconditionally, never behind a disclosure (**I5**)
-- [ ] Page ‹ › and zoom − + work; the page indicator is truthful
+- [x] Page ‹ › and zoom − + work; the page indicator is truthful — **tested**, `zoom_steps_by_the_delta_it_is_given` and `zoom_clamps_at_both_ends_without_snapping`
 - [ ] `.jpg` opens without rasterisation and reads
 - [ ] `Line` lives in `Contracts`, bbox upper-left, asserted against a fixture line of known position
 - [ ] `rg 'import Vision' Sources | grep -v Tools/` empty · same for `SwiftUI`/`UI` and `URLSession`/`Gate`
@@ -227,9 +233,9 @@ Two rules carried from `coding-standards.md` §4 that bite in this slice:
 | `assets/scans/*.jpg` at 100 dpi / quality 40 | Lines come back. Degraded is the normal path, not the edge. |
 | 0-byte file · `.txt` renamed `.pdf` · password-protected PDF | Named refusal each, no crash |
 | 25 MB file | Refused naming the actual size and the 20 MB limit |
-| A PDF where page 3 fails to render | Pages 1–2 and 4–45 still read; page 3 reported, not swallowed |
+| A PDF where page 3 fails to render | Pages 1–2 and 4–45 still read; page 3 reported, not swallowed. **Tested** — `one_unrenderable_page_does_not_lose_the_rest`, against `Tests/PigeonEyeTests/Fixtures/damaged-page-2.pdf`. Every page failing is still a refusal. |
 | A 200-page PDF | Caps at 120 and **says so on screen** — a silent truncation reads as "read it all" |
-| Open a second file without quitting | Previous document's lines are gone, not merged |
+| Open a second file without quitting | Previous document's lines are gone, not merged — **including when the first read is slower and finishes last**. **Tested** — `a_later_open_wins_over_an_earlier_slower_one`. |
 
 ---
 

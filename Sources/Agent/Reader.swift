@@ -35,7 +35,16 @@ public struct Document: Sendable {
     /// Pages actually read. Differs from `pageCount` only when capped.
     public let pagesRead: Int
     public let capped: Bool
+    /// One entry per page in the read window, **positionally**: `pages[n - 1]` is
+    /// always page `n`, so `Finding.page` and click-to-jump stay 1-based-correct
+    /// even when a page in the middle could not be rendered. A page listed in
+    /// `failedPages` holds an empty placeholder here.
     public let pages: [Page]
+    /// Pages in the window that could not be rendered or read, 1-based, sorted.
+    /// Empty for every document in `assets/`. A damaged page must not cost the
+    /// user the other 50 (`features/01-read-it-locally.md` §7), and it must not
+    /// pass silently either — `project-overview.md` §9.
+    public let failedPages: [Int]
     public let log: [Step]
 
     public var fileName: String { url.lastPathComponent }
@@ -92,19 +101,30 @@ public func read(
     // Bounded fan-out: a full-width TaskGroup over 45 pages would hold 45
     // bitmaps at once. Each task opens its own PDFDocument — PDFKit is not
     // documented as safe to share across threads.
+    //
+    // Non-throwing on purpose. A throwing group cancels its siblings and
+    // unwinds the whole read, so one damaged page in a 51-page label used to
+    // cost the user the other 50. Each task reports its own outcome instead.
     for batch in stride(from: 0, to: toRead, by: Limits.concurrentPages) {
         let upper = min(batch + Limits.concurrentPages, toRead)
-        try await withThrowingTaskGroup(of: (Int, Page).self) { group in
+        await withTaskGroup(of: (Int, Page?).self) { group in
             for index in batch..<upper {
                 group.addTask {
-                    let img = switch kind {
-                    case .pdf: try rasterise(pdf: url, page: index + 1)
-                    case .image: try Tools.image(at: url)
+                    do {
+                        let img = switch kind {
+                        case .pdf: try rasterise(pdf: url, page: index + 1)
+                        case .image: try Tools.image(at: url)
+                        }
+                        return (index, try await ocr(img))
+                    } catch {
+                        // Named, not swallowed: the page number reaches the log
+                        // below and the screen. The error itself carries the
+                        // filename, so it is not logged (§5.2).
+                        return (index, nil)
                     }
-                    return (index, try await ocr(img))
                 }
             }
-            for try await (index, page) in group {
+            for await (index, page) in group {
                 pages[index] = page
                 done += 1
                 onProgress?(done, toRead)
@@ -112,23 +132,47 @@ public func read(
         }
     }
 
-    let read = pages.compactMap { $0 }
-    guard read.count == toRead else {
-        throw ReadFailure.unreadable(name: url.lastPathComponent, why: "only \(read.count) of \(toRead) pages could be read")
+    let failed = pages.enumerated().filter { $0.element == nil }.map { $0.offset + 1 }
+    // Every page failing is a different thing from some pages failing: there is
+    // no document to show, and an empty one dressed as success is exactly what
+    // `project-overview.md` §9 forbids.
+    guard failed.count < toRead else {
+        throw ReadFailure.unreadable(name: url.lastPathComponent,
+                                     why: "none of its \(toRead) page\(toRead == 1 ? "" : "s") could be read")
     }
+
+    // Placeholders keep `pages[n - 1] == page n` true, so a failed page shifts
+    // nothing downstream (I12's sibling problem — an off-by-one here would
+    // highlight the wrong region just as surely as a flipped origin).
+    let read = pages.map { $0 ?? Page(transcript: "", lines: [], tables: 0, lists: 0, data: [:]) }
 
     let confidences = read.compactMap(\.meanConfidence)
     let mean = confidences.isEmpty ? 0 : confidences.reduce(0, +) / Double(confidences.count)
-    note(String(format: "OCR %d page%@ · mean conf %.2f", toRead, toRead == 1 ? "" : "s", mean))
+    note(String(format: "OCR %d page%@ · mean conf %.2f", toRead - failed.count,
+                toRead - failed.count == 1 ? "" : "s", mean))
 
-    let blank = read.enumerated().filter { $0.element.lines.isEmpty }.map { $0.offset + 1 }
+    if !failed.isEmpty {
+        note("could not read \(failed.count == 1 ? "page" : "pages") \(list(failed)) · read the rest", .flag)
+    }
+
+    let blank = read.enumerated()
+        .filter { $0.element.lines.isEmpty && !failed.contains($0.offset + 1) }
+        .map { $0.offset + 1 }
     if !blank.isEmpty {
         note("no text on \(blank.count) page\(blank.count == 1 ? "" : "s")", .flag)
     }
     note("network calls: 0")
 
     return Document(url: url, kind: kind, pageCount: total, pagesRead: toRead,
-                    capped: capped, pages: read, log: log)
+                    capped: capped, pages: read, failedPages: failed, log: log)
+}
+
+/// "2", "2 and 7", "2, 7 and 9" — page numbers are the one document-derived
+/// value that is safe to log (§5.2 allows counts and positions, never content).
+private func list(_ numbers: [Int]) -> String {
+    guard let last = numbers.last else { return "" }
+    guard numbers.count > 1 else { return "\(last)" }
+    return numbers.dropLast().map(String.init).joined(separator: ", ") + " and \(last)"
 }
 
 /// Format and size, checked before anything is opened or rendered.
