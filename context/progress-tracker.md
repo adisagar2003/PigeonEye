@@ -22,6 +22,13 @@ A review of the merged F1 found four defects, all of them in behaviour
 `features/01-read-it-locally.md` §7 had already specified and no test covered.
 Each now has the test that was missing (§ "F1 review" below).
 
+**The product now has one way in: `Open…`.** The two demo fixture buttons are
+removed (Decision log, last row). With them went the last `#filePath` in
+`Sources/` — `rg '#filePath|#file' Sources` is empty, and the app no longer
+needs the source tree to exist at runtime. That was the standing blocker on
+ever shipping this as a signed `.app`, and it is now gone. `assets/` is
+unchanged and still feeds the tests and `eval/`.
+
 ---
 
 ## Build order
@@ -473,12 +480,15 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Escalations stay visible even with the prompt gone** — every escalated value is marked escalated, and inspector mode still shows what was sent where | mine |
 | **The no-network claim is scoped to the local tier, and the tier is disclosed at import** — not in settings, not in a tooltip | yours |
 | I1 and Boundary C in `architecture.md` reworded to be tier-conditional; the single-egress-function rule is unchanged in both tiers | consequence of the above |
+| **The root is an allowlist, checked by `scripts/layers.sh`** — a root file has no directory, so no layer, so no import rule. Code with a layer goes in `Sources/`, prototypes in `spikes/`, and every spike header names the slice that deletes it | yours, enforced by mine |
+| **`eval/` stays Python and stays at the root level** — it is measurement, not a layer, and `assets/golden/` + the four metrics have no Swift equivalent worth writing | mine |
 | **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
 | **`Document` reports `failedPages` and reads on** — a damaged page costs that page, never the document | consequence of the F1 review |
 | **Zoom bound and step live in `Contracts.Zoom`** — the bug was the toolbar's step and the model's arithmetic disagreeing | consequence of the F1 review |
 | **Boundary A is deterministic and document-stateless, but not freely parallelisable** — the process-wide Vision gate is part of the contract, so a future caller cannot fan out and rediscover the crash | consequence of the PR #9 review |
 | **Every `ReaderModel` state write is guarded by request *and* phase** — `requestID` alone only rejects a different open; a progress event from the current read could still land after `.ready` | consequence of the PR #9 review |
 | **`ReaderModel` takes its reader as an init parameter** — the only way to test a completion-order race is to hold the progress handler and call it late. Production always gets `Agent.read` | consequence of the PR #9 review |
+| **No demo fixtures in the product.** The two header buttons are gone; `Open…` is the only way a document enters the app. They read as a capability list — two named documents answering "what can this open?" when the answer is `Limits.formats` — and they could not have survived distribution anyway: `repoRoot` resolved them through `#filePath`, a build-machine literal | yours |
 
 ---
 
