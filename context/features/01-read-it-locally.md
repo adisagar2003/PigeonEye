@@ -149,9 +149,17 @@ binary at the root stays — `spikes/page_index.py`, `eval/openai_run.py` and
 ocr(CGImage) -> [Line]
 ```
 
-Pure. No state, no network, no UI knowledge. `architecture.md` §10 depends on
-this staying a pure function with a JSON contract — it is what makes a later
-Tauri port a re-shell rather than a rewrite.
+Deterministic. No network, no UI knowledge, and nothing about a document kept
+between calls. `architecture.md` §10 depends on this staying a function with a
+JSON contract — it is what makes a later Tauri port a re-shell rather than a
+rewrite.
+
+It is **not** freely parallelisable. The implementation holds a process-wide
+concurrency gate — no document data, only a cap on in-flight Vision requests,
+because stacking them segfaults inside Apple's TextRecognition. A caller that
+bounds its own fan-out has not bounded anything: two callers doing that put
+twice the limit in flight, which is why the gate lives at the boundary and not
+in `Agent.read`.
 
 ### 4.3 The coordinate origin, converted once
 

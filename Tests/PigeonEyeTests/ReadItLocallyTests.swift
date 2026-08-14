@@ -241,7 +241,20 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
     try single.write(to: onlyBadPage, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: onlyBadPage) }
 
-    await #expect(throws: (any Error).self) { try await read(onlyBadPage) }
+    // `any Error` would also be satisfied by a cancellation or a raw PDFKit
+    // error, which is the opposite of the promise: the refusal has to be one
+    // the reader can read. Assert the case and the sentence.
+    do {
+        _ = try await read(onlyBadPage)
+        Issue.record("a document with no readable page was accepted as success")
+    } catch let failure as ReadFailure {
+        guard case let .unreadable(name, why) = failure else {
+            Issue.record("expected .unreadable, got \(failure)")
+            return
+        }
+        #expect(name == onlyBadPage.lastPathComponent)
+        #expect(why == "none of its 1 page could be read")
+    }
 }
 
 // MARK: - 11 · ReaderModel (layer 4) — request invalidation and zoom
@@ -276,6 +289,53 @@ func page_cap_is_computed_not_silent(total: Int, expected: Int, capped: Bool) {
     // A second read builds a fresh log with fresh Step ids. Same id ⇒ the
     // document on screen is the one already read, untouched.
     #expect(model.doc?.log.first?.id == firstRead, "the same document was read twice")
+}
+
+/// 🔥 The other completion-order race in the same flow. Progress is delivered
+/// on unstructured tasks, so one can be queued on the main actor when `read`
+/// returns and land *after* `phase` is `.ready` — putting a finished document
+/// back on the "Reading page…" screen with nothing left running to take it off.
+@Test @MainActor func a_late_progress_event_cannot_undo_a_finished_read() async {
+    // Hold the handler instead of a clock: the point is *when* it is called,
+    // not how long the read took.
+    nonisolated(unsafe) var late: (@Sendable (Int, Int) -> Void)?
+    let model = ReaderModel(read: { url, onProgress in
+        late = onProgress
+        return try await read(url)
+    })
+
+    await model.open(Fixture.scan)
+    guard case .ready = model.phase else {
+        Issue.record("the read did not finish; the rest of this test proves nothing")
+        return
+    }
+
+    late?(1, 1)
+    // Enqueued after the progress task, so by the time this resumes that task
+    // has had its turn.
+    _ = await Task { @MainActor in }.value
+
+    guard case .ready = model.phase else {
+        Issue.record("a stale progress event put a finished document back to .reading")
+        return
+    }
+}
+
+/// A failed page is represented by no image, and the pane's fallback for no
+/// image is a spinner. Without this the toolbar says a page failed while the
+/// page itself says it is still working — `project-overview.md` §9.
+@Test @MainActor func an_unreadable_page_is_named_on_the_page_it_belongs_to() async {
+    let model = ReaderModel()
+    await model.open(Fixture.damaged)
+
+    #expect(model.doc?.failedPages == [2])
+    #expect(!model.pageFailed, "page 1 rendered; nothing should claim it failed")
+
+    model.page = 2
+    #expect(model.pageFailed, "page 2 could not be rendered and the pane says nothing")
+
+    model.page = 3
+    #expect(!model.pageFailed)
 }
 
 /// Zoom multiplied the delta by 100 before adding it, so the first click of

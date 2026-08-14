@@ -219,7 +219,7 @@ network and no downloads.** Handy has to ask for a model download; you don't.
 
 | Boundary | Contract |
 |---|---|
-| **A** OCR | `image → [Line]` where `Line = (text, confidence, bbox, isTitle, candidates)`. Pure function, no state, no network. |
+| **A** OCR | `image → [Line]` where `Line = (text, confidence, bbox, isTitle, candidates)`. Deterministic, no network, and it keeps nothing about a document between calls. It is **not** freely parallelisable: implementations may hold a process-wide concurrency gate, which retains no document data and exists only to enforce the measured safe number of in-flight Vision requests. |
 | **B** reasoning | `[Line] + structure → [Finding]`. Chunked (§3.1). Swappable — this is the §3.2 fallback point. |
 | **C** gate | The only place a decision leaves the system. Must render the exact crop set before sending. |
 | **D** UI | In-process SwiftUI state. Native has no HTTP boundary here — one fewer surface than the Tauri/Electron design. |
