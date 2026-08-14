@@ -259,6 +259,11 @@ public struct ReaderScreen: View {
                     .offset(x: field.region.x * geo.size.width,
                             y: field.region.y * geo.size.height)
             }
+            // Overlays are not clipped to what they overlay. A widget whose rect
+            // sits off-page would otherwise stroke over the pane background
+            // instead of the paper — the second half of the off-page stress case,
+            // where `isDrawable` covers the zero-sized half.
+            .clipped()
             .allowsHitTesting(false)
         }
     }

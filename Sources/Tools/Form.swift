@@ -52,6 +52,9 @@ public func formFields(pdf url: URL) throws -> [Field] {
 /// Pure and separately tested because there is no rotated fixture in `assets/`,
 /// so a table of hand-computed rectangles is the only honest check on the
 /// quarter-turn cases.
+///
+/// - Precondition: `box` has non-zero width and height. `formFields` skips a
+///   page that fails it rather than dividing into a NaN region.
 func region(of rect: CGRect, in box: CGRect, rotation: Int) -> Region {
     let x = (rect.minX - box.minX) / box.width
     let y = (box.maxY - rect.maxY) / box.height  // the flip

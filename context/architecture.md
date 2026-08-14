@@ -191,26 +191,36 @@ network and no downloads.** Handy has to ask for a model download; you don't.
 │                            ▼                                   │
 │  ┌──────────────────────────────────────┐                      │
 │  │ PDFDocument  →  page images          │  in memory           │
-│  └───────────────┬──────────────────────┘                      │
-│                  │ Vision (in-process)      ← BOUNDARY A       │
-│  ┌───────────────▼──────────────────────┐                      │
-│  │ lines: text + confidence + bbox      │                      │
-│  │ paragraphs / tables / lists          │                      │
-│  └───────────────┬──────────────────────┘                      │
-│                  │ validators + chunked FM  ← BOUNDARY B       │
-│  ┌───────────────▼──────────────────────┐                      │
-│  │ findings (label, value, confidence,  │                      │
-│  │ quote, region, validated)            │                      │
-│  └───────────────┬──────────────────────┘                      │
-│                  │                                             │
-│  ┌───────────────▼──────────────────────┐                      │
-│  │ CONFIDENCE GATE                      │  ← BOUNDARY C        │
-│  │ consent, shows exact crops           │     human-in-the-loop│
-│  └───────────────┬──────────────────────┘                      │
-│                  │ SwiftUI state (no IPC)   ← BOUNDARY D       │
-│  ┌───────────────▼──────────────────────┐                      │
-│  │ PDFView + overlay + findings panel   │                      │
-│  └──────────────────────────────────────┘                      │
+│  └────┬────────────────────┬────────────┘                      │
+│       │ AcroForm widgets   │ Vision (in-process)               │
+│       │   ← BOUNDARY F     │   ← BOUNDARY A                    │
+│  ┌────▼─────────────┐      │                                   │
+│  │ fields (name,    │      │  ground truth from the file:      │
+│  │ kind, page,      │      │  no OCR, no model, no gate,       │
+│  │ region)          │      │  no confidence, I3 n/a  (§9.1)    │
+│  └────┬─────────────┘      │                                   │
+│       │       ┌────────────▼─────────────┐                     │
+│       │       │ lines: text + confidence │                     │
+│       │       │ + bbox · paragraphs /    │                     │
+│       │       │ tables / lists           │                     │
+│       │       └────────────┬─────────────┘                     │
+│       │                    │ validators + chunked FM           │
+│       │                    │   ← BOUNDARY B                    │
+│       │       ┌────────────▼─────────────┐                     │
+│       │       │ findings (label, value,  │                     │
+│       │       │ confidence, quote,       │                     │
+│       │       │ region, validated)       │                     │
+│       │       └────────────┬─────────────┘                     │
+│       │                    │                                   │
+│       │       ┌────────────▼─────────────┐                     │
+│       │       │ CONFIDENCE GATE          │ ← BOUNDARY C        │
+│       │       │ consent, shows crops     │  human-in-the-loop  │
+│       │       └────────────┬─────────────┘                     │
+│       │                    │ SwiftUI state (no IPC)            │
+│       │                    │   ← BOUNDARY D                    │
+│  ┌────▼────────────────────▼────────────────────────┐          │
+│  │ page raster + field list + highlight + findings  │          │
+│  └──────────────────────────────────────────────────┘          │
 └────────────────────────────┬───────────────────────────────────┘
                              │ ONLY consented crops
                              ▼
