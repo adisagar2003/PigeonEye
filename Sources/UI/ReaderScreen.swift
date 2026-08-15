@@ -441,6 +441,11 @@ public struct ReaderScreen: View {
                     // would be asking them to think of a question they no
                     // longer have.
                     if let explanation = model.explanation { explanationBlock(explanation) }
+                    // Between the whole-document reading and the ask box,
+                    // because it is the same question at a scope in between:
+                    // the reading above covers everything, the box below covers
+                    // one page, and this covers whatever the reader picks.
+                    SummaryBlock(page: model.page, lastPage: doc.navigablePageCount)
                     askBlock
                     if doc.isForm { fieldsBlock(doc) }
                     findingsBlock(doc)

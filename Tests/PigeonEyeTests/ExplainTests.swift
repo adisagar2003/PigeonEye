@@ -315,7 +315,7 @@ func an_incomplete_reply_cannot_replace_the_local_explanation(payload: String) a
     // the budget. The transcript is empty, so nothing the loop can cut helps.
     let huge = String(repeating: "x", count: 4_000)
     let findings = (0..<60).map { _ in
-        Finding(id: UUID().uuidString, label: "Quote", value: nil, conf: 0.9,
+        Finding(id: UUID().uuidString, label: "Quote", kind: .other, value: nil, conf: 0.9,
                 quote: huge, page: 1,
                 region: Region(x: 0, y: 0, width: 1, height: 0.01),
                 origin: .datadetector, signals: [])
@@ -344,7 +344,7 @@ func an_incomplete_reply_cannot_replace_the_local_explanation(payload: String) a
         pages: [Page(transcript: "x", lines: [], tables: 0, lists: 0, data: [:])],
         failedPages: [], fields: [],
         findings: (0..<60).map { _ in
-            Finding(id: UUID().uuidString, label: "Quote", value: nil, conf: 0.9,
+            Finding(id: UUID().uuidString, label: "Quote", kind: .other, value: nil, conf: 0.9,
                     quote: huge, page: 1,
                     region: Region(x: 0, y: 0, width: 1, height: 0.01),
                     origin: .datadetector, signals: [])
