@@ -1,5 +1,3 @@
-import Agent
-import AppKit
 import SwiftUI
 
 // The first-run explainer. Four cards, stepped through by hand, then never
@@ -46,6 +44,13 @@ public struct OnboardingScreen: View {
 
         /// The default, per §5: the cloud leg is what the demo runs on.
         public static let preferred = Tier.openAI
+
+        /// The one key this preference lives under, shared by every view that
+        /// binds it. A second view spelling the string itself is how a settings
+        /// pane comes to write somewhere the reader never looks — the "setting
+        /// that lies" failure `ReaderModel.honour` exists to prevent, one level
+        /// up and harder to see.
+        public static let storageKey = "readingTier"
 
         public var title: String {
             switch self {
@@ -125,16 +130,9 @@ public struct OnboardingScreen: View {
     }
 
     @State private var index = 0
-    /// Same store and same reason as `onboardingSeen` in `ReaderScreen`: a
-    /// SwiftPM executable has no bundle, so this lands in
-    /// `~/Library/Preferences/PigeonEye.plist` and survives a rebuild.
-    @AppStorage("readingTier") private var tier = Tier.preferred
-    /// Asked once here and again every time the app comes back to the front.
-    /// "Download now" sends the user to System Settings, so the trip back is
-    /// exactly when the answer has changed — a value read straight in `body`
-    /// would leave the button offering a download that has already happened.
-    @State private var localModelReady = localModelAvailable()
-    @Environment(\.scenePhase) private var scenePhase
+    // The tier binding, the on-device availability check and the scene-phase
+    // refresh all moved to `TierPicker` with the control itself. This screen
+    // shows the picker; it no longer has an opinion about what is in it.
     private let done: () -> Void
 
     public init(done: @escaping () -> Void) { self.done = done }
@@ -154,9 +152,6 @@ public struct OnboardingScreen: View {
             .blueprint()
         }
         .foregroundStyle(Ink.text)
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active { localModelReady = localModelAvailable() }
-        }
     }
 
     private var card: some View {
@@ -167,54 +162,10 @@ public struct OnboardingScreen: View {
             Text(card.detail)
                 .font(.body(13.5)).foregroundStyle(Ink.neutral700)
                 .fixedSize(horizontal: false, vertical: true)
-            if card.picksTier { picker.padding(.top, 6) }
+            if card.picksTier { TierPicker().padding(.top, 6) }
         }
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
         .padding(28)
-    }
-
-    /// A plain menu `Picker`. The rest of this app draws its own controls
-    /// because the design has no stock equivalent; a dropdown does, and the
-    /// stock one already handles keyboard, VoiceOver and the menu placement.
-    private var picker: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Model").kicker(11, tracking: 1.1)
-
-            Picker("Model", selection: $tier) {
-                ForEach(Tier.allCases) { option in Text(option.title).tag(option) }
-            }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .tint(Ink.accent)
-            .frame(width: 190)
-
-            Text(tier.detail)
-                .font(.body(12)).foregroundStyle(Ink.neutral600)
-                .fixedSize(horizontal: false, vertical: true)
-
-            // Only when macOS has not put the on-device model here yet. Offering
-            // it unconditionally would be this screen's first false statement.
-            if Self.needsDownload(tier, modelReady: localModelReady) {
-                Button(action: openSettings) {
-                    Text("Download now")
-                        .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
-                        .padding(.horizontal, 12).padding(.vertical, 6)
-                        .foregroundStyle(Ink.accent700)
-                        .overlay(Rectangle().stroke(Ink.accent400, lineWidth: 1))
-                }
-                .buttonStyle(.flat)
-                .help("Apple Intelligence downloads the model. Opens System Settings.")
-            }
-        }
-    }
-
-    /// ponytail: the top of System Settings, not the Apple Intelligence pane.
-    /// The per-pane URL is an undocumented bundle id that has moved between
-    /// releases, and landing on the wrong pane is worse than landing on the
-    /// front page. Deep-link it when there is a documented anchor to use.
-    private func openSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:") else { return }
-        NSWorkspace.shared.open(url)
     }
 
     private var controls: some View {
