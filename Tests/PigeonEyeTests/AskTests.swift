@@ -1,0 +1,259 @@
+import AppKit
+import Foundation
+import Testing
+
+@testable import Agent
+@testable import Contracts
+@testable import Gate
+@testable import Tools
+@testable import UI
+
+// F9 — asking about the page that is open.
+//
+// The feature is a conversation grounded on one page, with the model allowed to
+// ask for other pages it has not been shown. Three things have to hold, and each
+// has a test below rather than a comment:
+//
+//   • **I1** — nothing leaves before the reader grants it, and only page text
+//     leaves at all.
+//   • **I10** — the hop loop is bounded. A model that keeps asking for pages
+//     must be cut off and still produce an answer.
+//   • **I6** — a failed or absent endpoint costs the answer, never the document.
+//
+// No test here touches the network: `Gate.Transport` is injected everywhere.
+
+private let okResponse = HTTPURLResponse(
+    url: URL(string: "https://api.openai.com/v1/chat/completions")!,
+    statusCode: 200, httpVersion: nil, headerFields: nil)!
+
+private func config() throws -> Gate.Config {
+    try #require(Gate.Config.fromEnvironment(["OPENAI_KEY": "sk-test"]))
+}
+
+/// A chat-completions reply carrying prose.
+private func says(_ text: String) -> Data {
+    try! JSONSerialization.data(withJSONObject: [
+        "choices": [["message": ["role": "assistant", "content": text]]],
+    ])
+}
+
+/// A chat-completions reply asking to read another page.
+private func wantsPage(_ number: Int, id: String = "call_1") -> Data {
+    try! JSONSerialization.data(withJSONObject: [
+        "choices": [["message": [
+            "role": "assistant",
+            "content": NSNull(),
+            "tool_calls": [[
+                "id": id, "type": "function",
+                "function": ["name": "read_page", "arguments": "{\"page\": \(number)}"],
+            ]],
+        ], "finish_reason": "tool_calls"]],
+    ])
+}
+
+/// A three-page document whose pages are trivially distinguishable, so a test
+/// can assert *which* page's words were sent.
+private func document(pages: Int = 3, findings: [Finding] = []) -> Document {
+    Document(
+        url: URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"), kind: .pdf,
+        pageCount: pages, pagesRead: pages, capped: false,
+        pages: (1...pages).map {
+            Page(transcript: "This is page \($0). Marker\($0)-\(String(repeating: "x", count: 20)).",
+                 lines: [], tables: 0, lists: 0, data: [:])
+        },
+        failedPages: [], fields: [], findings: findings, log: [])
+}
+
+/// Records every request the code tried to make, and answers from a script.
+private final class Recorder: @unchecked Sendable {
+    private(set) var sent: [URLRequest] = []
+    private var replies: [Data]
+
+    init(_ replies: [Data]) { self.replies = replies }
+
+    /// The last scripted reply repeats, so a bounded loop can be driven past its
+    /// bound without the script having to know the bound.
+    var transport: Gate.Transport {
+        { [self] request in
+            sent.append(request)
+            let data = replies.count > 1 ? replies.removeFirst() : replies[0]
+            return (data, okResponse)
+        }
+    }
+
+    /// Every byte of every request body, as one string. What a scrape of the
+    /// wire would see.
+    var wire: String { sent.map { String(decoding: $0.httpBody ?? Data(), as: UTF8.self) }.joined() }
+}
+
+// MARK: - 1 · Grounding — the page you are looking at
+
+/// The question is answered about the page on screen, so that page's words are
+/// what go out — and no others go with them uninvited. Sending the whole
+/// document on every question would make "this page's text is sent" a lie.
+@Test func the_question_carries_the_open_page_and_not_the_rest() async throws {
+    let tap = Recorder([says("The document does not say.")])
+    _ = await answered(document(), page: 2, question: "what does this mean?",
+                       history: [], config: try config(), transport: tap.transport)
+
+    #expect(tap.wire.contains("Marker2"), "the open page's text never went out")
+    #expect(!tap.wire.contains("Marker1"), "a page the reader was not looking at was sent")
+    #expect(!tap.wire.contains("Marker3"), "a page the reader was not looking at was sent")
+}
+
+/// Values already recognised deterministically travel with the question, quotes
+/// included. They are the one part of the payload that carries provenance, and
+/// leaving them out asks the model to re-derive what the machine already knows.
+@Test func recognised_values_on_the_page_travel_with_the_question() async throws {
+    let transcript = document().pages[0].transcript
+    let found = try #require(finding(
+        label: "EPA reg. no.", value: "524-529", quote: transcript, page: 1,
+        region: Region(x: 0, y: 0, width: 1, height: 0.1),
+        origin: .validator, validated: true, conf: 0.7,
+        in: transcript))
+
+    let tap = Recorder([says("ok")])
+    _ = await answered(document(findings: [found]), page: 1, question: "which registration?",
+                       history: [], config: try config(), transport: tap.transport)
+
+    #expect(tap.wire.contains("524-529"))
+}
+
+// MARK: - 2 · The hop — pages it was not shown
+
+/// The whole point of the tool loop: the answer is on page 3, the reader is on
+/// page 1, and the model can go and get it.
+@Test func a_read_page_call_fetches_that_page_and_records_it() async throws {
+    let tap = Recorder([wantsPage(3), says("It is on page 3.")])
+    let answer = await answered(document(), page: 1, question: "where are the rates?",
+                                history: [], config: try config(), transport: tap.transport)
+
+    #expect(answer.text.contains("page 3"))
+    #expect(answer.pagesUsed == [1, 3], "the pages an answer rests on are what the inspector shows")
+    #expect(tap.wire.contains("Marker3"), "the fetched page's text never reached the model")
+}
+
+/// **I10.** A model that never stops asking is cut off, and the reader still
+/// gets a sentence. An unbounded loop here is an unbounded bill and a hang.
+@Test func a_model_that_only_ever_asks_for_pages_is_cut_off_and_still_answers() async throws {
+    let tap = Recorder([wantsPage(2)])  // repeats forever
+    let answer = await answered(document(), page: 1, question: "?",
+                                history: [], config: try config(), transport: tap.transport)
+
+    #expect(tap.sent.count <= Limits.askHops + 1, "the hop loop is not bounded")
+    #expect(!answer.text.isEmpty, "a cut-off loop still owes the reader a sentence")
+    #expect(answer.note != nil, "a cut-off loop that says nothing about it reads as a complete answer")
+}
+
+/// One bad call must not cost the turn. A page that was never read has no text,
+/// and saying so is an answer the model can work with.
+@Test func a_call_for_a_page_that_was_never_read_does_not_lose_the_answer() async throws {
+    let tap = Recorder([wantsPage(99), says("Page 99 does not exist; on page 1 it says…")])
+    let answer = await answered(document(), page: 1, question: "what about page 99?",
+                                history: [], config: try config(), transport: tap.transport)
+
+    #expect(!answer.text.isEmpty)
+    #expect(answer.pagesUsed == [1], "a page that was never read cannot be a page the answer rests on")
+}
+
+// MARK: - 3 · I1 · Nothing leaves un-granted
+
+/// The grant is per document and is taken once, in the panel, before the first
+/// question — `project-overview.md` §4.1. Until it is taken, the transport is
+/// never reached.
+@MainActor
+@Test func nothing_is_sent_before_the_reader_grants_it() async throws {
+    let tap = Recorder([says("hello")])
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: tap.transport)
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+
+    await model.ask("what does this say?")
+    #expect(tap.sent.isEmpty, "a question was sent before the reader agreed to send anything")
+    #expect(model.askPending != nil, "the question was dropped instead of held for the grant")
+
+    model.grantAsk()
+    await model.sendPending()
+    #expect(tap.sent.count == 1)
+}
+
+/// Opening another document drops the conversation and the grant with it
+/// (**I9**). A grant that outlives its document is a grant for a document the
+/// reader never saw.
+@MainActor
+@Test func opening_another_document_clears_the_chat_and_the_grant() async throws {
+    let tap = Recorder([says("hello")])
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: tap.transport)
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.grantAsk()
+    await model.ask("hello?")
+    #expect(!model.turns.isEmpty)
+
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-other.pdf"))
+    #expect(model.turns.isEmpty, "the previous document's conversation survived into this one")
+    #expect(model.askGranted == false, "a grant for one document was reused for another")
+    #expect(model.sends.isEmpty)
+}
+
+// MARK: - 4 · I6 · A broken endpoint costs the answer, never the document
+
+@MainActor
+@Test func a_refused_key_leaves_the_document_on_screen() async throws {
+    let refuse: Gate.Transport = { request in
+        (Data(), HTTPURLResponse(url: request.url!, statusCode: 401,
+                                 httpVersion: nil, headerFields: nil)!)
+    }
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: refuse)
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.grantAsk()
+    await model.ask("anything?")
+
+    #expect(model.doc != nil, "a failed question threw the document away")
+    #expect(model.turns.last?.text.contains("key") == true, "the reason was swallowed")
+}
+
+/// A 200 with nothing in it is a failure, not an answer. Rendering an empty
+/// bubble as success is the "empty result dressed as success" of
+/// `project-overview.md` §9.
+@Test func an_empty_reply_is_not_rendered_as_an_answer() async throws {
+    let empty = Recorder([try! JSONSerialization.data(withJSONObject: ["choices": []])])
+    let answer = await answered(document(), page: 1, question: "?",
+                                history: [], config: try config(), transport: empty.transport)
+
+    #expect(answer.note != nil, "an empty reply was passed off as an answer")
+    #expect(!answer.text.isEmpty, "an empty reply left the reader with a blank bubble")
+}
+
+// MARK: - 5 · §5.2 · What the inspector may say
+
+/// Inspector mode is a view, not an exemption. It shows that page 2's text went
+/// out and how much of it — never the text.
+@MainActor
+@Test func the_send_record_names_the_page_and_never_its_words() async throws {
+    let tap = Recorder([says("fine")])
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: tap.transport)
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.grantAsk()
+    model.page = 2
+    await model.ask("what is this?")
+
+    let record = model.sends.joined(separator: " ")
+    #expect(record.contains("2"), "the record does not say which page left")
+    #expect(!record.contains("Marker2"), "the document's own words are in the inspector record")
+    #expect(!record.contains("sk-test"), "the key is in the inspector record")
+    #expect(!record.contains("pigeoneye-ask"), "the filename is in the inspector record")
+}
+
+// MARK: - 6 · The `?` monitor, which now has a text field to share the app with
+
+/// The bare-`?` monitor sees every keystroke in the app, including the ones
+/// meant for the ask field. Before this, typing "what does ? mean" opened the
+/// shortcuts sheet and ate the character.
+@Test func a_question_mark_typed_into_a_field_is_a_question_mark() {
+    #expect(ShortcutsSheet.opensList(characters: "?", modifiers: [], typing: false))
+    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: [], typing: true),
+            "the shortcuts sheet is eating characters out of the ask field")
+}

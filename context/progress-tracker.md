@@ -14,6 +14,36 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
+**F9 slice 9.1 is `complete`, and it was taken out of order — on request.** The
+reader can ask a question about the page in front of them and get an answer
+grounded on that page, with the model able to fetch other pages it was not
+shown. It is a new feature, not a slice of an existing one: `issues.md` had no
+chat anywhere, and the only "ask" in it was F5's crop consent.
+
+**Three things this row changed that no later row gets to change back:**
+
+1. **Layer 3 exists.** `Sources/Gate/Gate.swift` is the first and only file in
+   the package that holds a socket. Until it landed, the no-network claim was
+   the absence of an API — checkable with one grep. It now rests on that file
+   being short enough to read in full, and on `scripts/layers.sh` keeping
+   `URLSession` out of everywhere else.
+2. **Two claims in the UI stopped being true and were changed in the same
+   diff.** The header said "Reads locally" unconditionally and the inspector
+   said "Left this machine: nothing". Reading *is* still entirely local — the
+   rasterise/OCR/findings path touches no network — but asking is not, so the
+   header now names the host once a grant is given and the inspector renders a
+   ledger of what left.
+3. **F5's egress work is partly done.** Slice 5.2's acceptance criterion
+   `rg 'URLSession|http' Sources | grep -v '^Sources/Gate/'` is empty and stays
+   empty. What 5.2 still owes is the *crop* egress and the approved-set
+   assertion; the config, transport seam and failure handling are built.
+
+**What it does not do**, deliberately: no `Finding` is ever minted from a chat
+answer. `Finding`'s initialiser is `package` and `Tools.finding(...)` is the one
+construction point that checks the quote against the transcript (**I2**). Chat
+prose is prose — it is rendered as an answer, never promoted into the findings
+list, so I2 is untouched rather than weakened.
+
 **F3 slice 3.2 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
 by the file, and a form's field list is read straight out of the AcroForm with
 page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
@@ -58,8 +88,9 @@ feature has a spec under `context/features/`. One source of truth, per
 | F4 | Explain it | — | not started |
 | F5 | Escalate with consent | — | not started |
 | F6 | Fail honestly | — | not started |
-| F7 | Inspector mode | — | partial (step log shipped in F1) |
+| F7 | Inspector mode | — | partial (step log shipped in F1; the egress ledger shipped in F9) |
 | F8 | Export | — | not started |
+| F9 | Ask about this page | — | **complete** — 9.1, built out of order (see Current phase) |
 
 The old stage numbers survive where they are load-bearing: `coding-standards.md`
 §4 maps stages to the tests that must fail first, and F1 covers stage 1.
@@ -611,6 +642,13 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Every `ReaderModel` state write is guarded by request *and* phase** — `requestID` alone only rejects a different open; a progress event from the current read could still land after `.ready` | consequence of the PR #9 review |
 | **`ReaderModel` takes its reader as an init parameter** — the only way to test a completion-order race is to hold the progress handler and call it late. Production always gets `Agent.read` | consequence of the PR #9 review |
 | **No demo fixtures in the product.** The two header buttons are gone; `Open…` is the only way a document enters the app. They read as a capability list — two named documents answering "what can this open?" when the answer is `Limits.formats` — and they could not have survived distribution anyway: `repoRoot` resolved them through `#filePath`, a build-machine literal | yours |
+| **The reader can ask about the page they are on** — a conversation grounded on one page, not on the document. Sending all 45 pages on every question would make "this page's text is sent" a sentence the app cannot mean | yours |
+| **The model may fetch pages it was not shown, through one tool (`read_page`), bounded at `Limits.askHops`** — the answer to "where are the woody-brush rates" is on page 34 while the reader is on page 12, and a reader who already knew which page to turn to would not be asking. On the last hop the tool is withdrawn rather than the turn abandoned, so the bound costs latency, never the answer | yours |
+| **The ask grant is per document, taken in the panel before the first question** — the same shape as the import-time grant in `project-overview.md` §4.1, for the same reason: a second prompt after the page text has already gone to that endpoint performs protection rather than providing it | yours |
+| **Chat prose never becomes a `Finding`** — `Finding`'s initialiser is `package` and `Tools.finding(...)` is the one place a quote is checked against the transcript. Promoting an answer into the findings list would make **I2** a comment. The answer names its pages instead, so a claim can be checked against the page it came from | mine |
+| **`Gate` depends on `Contracts` alone, not on `Tools`** — an egress that can reach `Tools` can read a file, and the single thing this boundary promises is that it cannot. The hop loop therefore lives in layer 4, which is the only layer that sees both the `Document` and the egress | mine |
+| **The header chip and the inspector's "left this machine" line are now conditional, not constants** — both were true by construction while no Gate layer existed. A claim that is true of the reading path and quietly false of the asking path is exactly the fallback-you-have-to-discover that `project-overview.md` §3.1 rules out | consequence of F9 |
+| **`ShortcutsSheet.opensList` takes `typing:`** — the bare-`?` monitor sees every keystroke in the app, so the moment there was a field to type a question into, "what does ? mean" opened the shortcuts sheet and ate the character. A shortcut that steals characters out of a field is worse than no shortcut | consequence of F9 |
 
 ---
 

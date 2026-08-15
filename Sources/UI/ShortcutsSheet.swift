@@ -19,6 +19,7 @@ public struct ShortcutsSheet: View {
         .init(keys: "⌘−  ⌘+", what: "Zoom out / in"),
         .init(keys: "⇧⌘T", what: "Show or hide the text it read"),
         .init(keys: "⌘I", what: "Inspector — every step it took"),
+        .init(keys: "⌘K", what: "Ask about the page you are on"),
         .init(keys: "?", what: "This list"),
         .init(keys: "esc", what: "Close this list"),
     ]
@@ -30,8 +31,15 @@ public struct ShortcutsSheet: View {
     /// key equivalent has to name one modifier set, and the layout decides
     /// which one that is. Command, Control and Option are excluded so this can
     /// never swallow a real shortcut.
-    public static func opensList(characters: String?, modifiers: NSEvent.ModifierFlags) -> Bool {
-        characters == "?" && modifiers.intersection([.command, .control, .option]).isEmpty
+    ///
+    /// `typing` is the whole reason this takes a third argument. The monitor
+    /// behind it sees **every** keystroke in the app, and returning true
+    /// swallows the character — so once there is a text field to type a question
+    /// into, "what does ? mean here" opened this sheet and ate the `?`. A
+    /// shortcut that steals characters out of a field is worse than no shortcut.
+    public static func opensList(characters: String?, modifiers: NSEvent.ModifierFlags,
+                                 typing: Bool) -> Bool {
+        !typing && characters == "?" && modifiers.intersection([.command, .control, .option]).isEmpty
     }
 
     private let close: () -> Void

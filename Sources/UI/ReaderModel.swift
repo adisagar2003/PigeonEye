@@ -2,6 +2,7 @@ import Agent
 import Contracts
 import CoreGraphics
 import Foundation
+import Gate
 import Observation
 
 /// Everything the reader screen knows. Layer 4 — it holds no reading logic of
@@ -52,11 +53,23 @@ public final class ReaderModel {
     /// call it late. Production always gets `Agent.read`.
     private let read: @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
 
+    /// `nil` when there is no key in the environment, and the panel then offers
+    /// no box to type in. A field that cannot send is worse than no field.
+    ///
+    /// Injectable for the same reason `read` is: a test that asserts nothing
+    /// leaves the machine has to be able to watch the thing that would send it.
+    public let cloud: Gate.Config?
+    private let transport: Gate.Transport
+
     public init(
         read: @escaping @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
-            = Agent.read
+            = Agent.read,
+        cloud: Gate.Config? = Gate.Config.fromEnvironment(ProcessInfo.processInfo.environment),
+        transport: @escaping Gate.Transport = Gate.defaultTransport
     ) {
         self.read = read
+        self.cloud = cloud
+        self.transport = transport
     }
 
     /// Identifies the newest request. Every `await` in this file is a point where
@@ -79,6 +92,85 @@ public final class ReaderModel {
     public private(set) var notice: String?
     private var noticeID = UUID()
 
+    // MARK: - Asking about the page
+
+    /// The conversation about this document. Memory only, dropped the moment
+    /// another document is opened (**I9**) — there is no persistence path in
+    /// this app and this feature does not add one.
+    public private(set) var turns: [Turn] = []
+
+    /// True while a question is in flight. The box stays visible and disabled
+    /// rather than disappearing: a control that vanishes mid-action reads as a
+    /// crash.
+    public private(set) var answering = false
+
+    /// Whether the reader has agreed that this document's pages may be sent.
+    /// Taken once per document, in the panel, before the first question
+    /// (`project-overview.md` §4.1 — consent at document scope, not per message,
+    /// because a second prompt after the first send protects nothing).
+    public private(set) var askGranted = false
+
+    /// A question typed before the grant was given. Held rather than dropped, so
+    /// agreeing sends the question the reader already wrote instead of making
+    /// them type it again.
+    public private(set) var askPending: String?
+
+    /// What left the machine, for the inspector: page number, size, host. Never
+    /// the words (`coding-standards.md` §5.2).
+    public private(set) var sends: [String] = []
+
+    /// Ask about the page currently on screen.
+    ///
+    /// Before the grant this only *holds* the question — the transport is not
+    /// reached, which is what makes **I1** true here by construction rather than
+    /// by a check somewhere downstream.
+    public func ask(_ question: String) async {
+        let asked = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !asked.isEmpty, doc != nil, cloud != nil, !answering else { return }
+        guard askGranted else {
+            askPending = asked
+            return
+        }
+        await send(asked)
+    }
+
+    /// Agree that this document's pages may be sent. Does not itself send.
+    public func grantAsk() { askGranted = true }
+
+    /// Send whatever was typed before the grant. Separate from `grantAsk` so the
+    /// consent card can be dismissed without a request going out behind it.
+    public func sendPending() async {
+        guard askGranted, let held = askPending else { return }
+        askPending = nil
+        await send(held)
+    }
+
+    /// Throw away a question rather than sending it. The reader said no.
+    public func cancelPending() { askPending = nil }
+
+    private func send(_ question: String) async {
+        guard let doc, let cloud else { return }
+        let id = requestID
+        let asked = page
+
+        turns.append(Turn(role: .user, text: question))
+        answering = true
+
+        let answer = await answered(doc, page: asked, question: question,
+                                    history: turns.dropLast(), config: cloud,
+                                    transport: transport)
+
+        // The same generation check as every other await in this file: an answer
+        // about the document that *was* open must not land on the one that is.
+        guard requestID == id, self.doc?.url == doc.url else { return }
+
+        turns.append(Turn(role: .assistant,
+                          text: answer.note.map { "\(answer.text)\n\n\($0)" } ?? answer.text,
+                          pages: answer.pagesUsed))
+        sends.append(contentsOf: answer.sends)
+        answering = false
+    }
+
     public func open(_ url: URL) async {
         // Already read, or already reading. A second pass costs ~15s and cannot
         // return anything different, and because the pane is blanked first, it
@@ -100,6 +192,14 @@ public final class ReaderModel {
         zoom = 1
         selectedField = nil
         selectedFinding = nil
+        // The conversation, the grant and the record of what left all belong to
+        // the document that is going away (**I9**). A grant that outlives its
+        // document is a grant for a document the reader never agreed to send.
+        turns = []
+        askGranted = false
+        askPending = nil
+        answering = false
+        sends = []
 
         do {
             let document = try await read(url) { [weak self] done, total in

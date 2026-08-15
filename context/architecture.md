@@ -166,7 +166,7 @@ the PDF viewer and annotation layer are given to you.
 | Validators | regex + `detectedData` / `dateparser`/Duckling for portability | not built |
 | PDF + form fields | **PyMuPDF** or pdfium (portable) — AcroForm widgets + rects + text layer | **[measured]** 63/89/105 named fields across the three forms |
 | Masking *(future)* | **Presidio** — reversible pseudonymisation built in | not built |
-| Agent orchestration | One OpenAI-compatible `/v1` client, swappable base URL | **decided** — cloud for the demo, local where hardware allows |
+| Agent orchestration | One OpenAI-compatible `/v1` client, swappable base URL | **built** in F9 — `Sources/Gate/Gate.swift`, one POST, one tool (`read_page`), transport injected so tests never reach the network |
 | Local reasoning | Foundation Models, chunked per §3.1 | optional, not foundational. Device eligible **[measured]**, quality **[untested]**. mere.run **ruled out** — 16 GB headroom on a 16 GB machine |
 | Cloud escalation | OpenAI vision API, crops only | key not supplied |
 | Persistence | none (§7) | — |
@@ -234,7 +234,23 @@ network and no downloads.** Handy has to ask for a model download; you don't.
 | **B** reasoning | `[Line] + structure → [Finding]`. Chunked (§3.1). Swappable — this is the §3.2 fallback point. |
 | **C** gate | The only place a decision leaves the system. **Local tier:** must render the exact crop set before sending. **Cloud tier:** no per-crop prompt — consent is taken at import for the whole document (`project-overview.md` §4.1) — but the egress function is still the only exit, and every escalation is still recorded and shown. |
 | **D** UI | In-process SwiftUI state. Native has no HTTP boundary here — one fewer surface than the Tauri/Electron design. |
-| **Trust** | Local tier: crops only. Cloud tier: transcript text + crops, under the import-time grant. Either way: never the source file bytes, never a whole page image. |
+| **Q** ask | `question + open page → answer`. The reader asks about the page in front of them; the model may call one tool, `read_page(n)`, to fetch a page it was not shown, bounded at `Limits.askHops`. Built in F9. It crosses the trust boundary through the **same single egress function** as everything else, under a grant taken once per document in the ask panel. Produces prose, never a `Finding` — see the note under **I2** below. |
+| **Trust** | Local tier: crops only. Cloud tier: transcript text + crops, under the import-time grant; plus, under the ask grant, the text of pages the reader asked about. Either way: never the source file bytes, never the filename, never a whole page image. |
+
+### 6.1 Layer 3 exists, and what that costs
+
+Until F9 the no-network claim was **the absence of an API** — one grep, no
+argument. `Sources/Gate/Gate.swift` ends that, so the claim now rests on two
+things instead: the file is short enough to read in full, and
+`scripts/layers.sh` keeps `URLSession` out of every other directory.
+
+`Gate` depends on **`Contracts` alone**, deliberately — not on `Tools`. An
+egress that can reach `Tools` can rasterise and read a file, and the single
+thing this boundary promises is that it cannot. The consequence is that the ask
+loop cannot live in layer 3 (it needs the `Document`) and cannot live in layer 2
+(which may not import layer 3), so it lives in layer 4 — the only layer that
+sees both. That is not a workaround; it is the layer rule producing the right
+answer.
 
 **The trust boundary is the product.** Everything else is replaceable.
 
@@ -262,6 +278,8 @@ Shipping either would make the privacy claim false. The storage model is
 | Findings + confidence | SwiftUI state | session | no |
 | Escalation crops | memory; temp file only if the API client demands a path | until sent or discarded | no |
 | Cloud responses | merged into findings in memory | session | no |
+| Ask conversation | `ReaderModel.turns`, memory | **until another document is opened** | no |
+| Record of what was sent | `ReaderModel.sends`, memory | same | no — and it holds page numbers and sizes, never words |
 | API key | Keychain (native) or env var | — | never logged, never rendered |
 
 No database. No cache. No queue. No server. Nothing to GDPR.
@@ -294,6 +312,25 @@ Each is written to be checkable by a test, not by inspection.
 | **I11** | A skipped question still produces a rendered result | Skip marks unresolved and continues |
 | **I12** | Bounding boxes are interpreted in one consistent coordinate origin | §8.1 |
 | **I13** | No FM call exceeds the context window | Assert estimated tokens < limit before every call; chunk splits on failure |
+
+### 8.0 What F9 added to I1, I2 and I9
+
+**I1** — the ask grant is a second grant of the same kind as the import-time
+one: per document, taken before anything leaves, covering the honest scope
+("this page's text, and any page needed to answer"). It is not a second egress.
+Both grants funnel through the one function in `Sources/Gate/`.
+
+**I2 is untouched, and that is a design decision rather than an oversight.** A
+chat answer is prose the reader asked for; it is never promoted into the
+findings list. `Finding`'s initialiser is `package` and `Tools.finding(…)` is the
+one place a quote is checked against the transcript — minting a `Finding` from
+model prose would make I2 a comment. What the answer carries instead is the
+pages it rests on, rendered under it, so a claim can be checked against the page
+it came from.
+
+**I9** — the conversation, the grant and the send record all die when another
+document is opened. A grant that outlives its document is a grant for a document
+the reader never agreed to send.
 
 ### 8.1 The coordinate-origin invariant, because it will bite
 

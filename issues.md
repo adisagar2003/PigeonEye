@@ -1,6 +1,6 @@
 # Issues — Government Document Reader
 
-Eight **end-to-end features**. Inside each, the thin **slices** that build it —
+Nine **end-to-end features**. Inside each, the thin **slices** that build it —
 each slice a tracer bullet through every layer it needs, demoable on its own.
 
 A feature is what the user can do. A slice is one sitting's work that leaves the
@@ -34,6 +34,7 @@ Type: **AFK** = implementable and mergeable without a human decision.
 | **F6 Fail honestly** | Get told what couldn't be read, never a blank or a bluff | 6.1 | F4 |
 | **F7 Inspector mode** | See the step log, the signals, and exactly what was sent where | 7.1 | F3, F5 |
 | **F8 Export** | Save the findings to a path they pick | 8.1 | F4 |
+| **F9 Ask about this page** | Ask a question about the page in front of them and get an answer grounded on it | 9.1 | F1 |
 
 **Demo-complete after F6** — the three fixtures in `project-overview.md` §10 are
 F2 (a form), F5 (a degraded scan with consented escalation) and F6 (an honest
@@ -559,3 +560,68 @@ Decide Markdown / CSV / JSON, then write findings to a path the user picks.
 | Export a 105-field form | Complete, not truncated |
 | Path is unwritable / disk full | Named failure, nothing half-written |
 | **Grep the exported file** | No crop bytes, no key, no source path |
+
+---
+
+# F9 · Ask about this page
+
+**The user can:** type a question about the page they are looking at and get an
+answer grounded on that page — with the model allowed to go and read another
+page when the answer is not on this one, and with exactly what left the machine
+listed afterwards.
+
+**Feature demo:** open the 45-page EPA label, page to 12, ask "what is the
+restricted-entry interval here?". Then ask "where are the woody-brush rates?" —
+the answer names page 34, a page the model was never shown, and the inspector
+lists both pages as having left.
+
+**Done when:** 9.1 passes.
+
+**Why it is not part of F4.** F4 explains the *document*, once, unprompted. This
+answers a *question* about one page, on demand. They share an endpoint and
+nothing else: F4's output is the tier-1 contract (`architecture.md` §11), this
+one's output is prose the reader asked for and can throw away.
+
+---
+
+## 9.1 A conversation grounded on the open page
+
+**Type:** AFK · **Blocked by:** 1.1 · **Rows:** 4, 6
+
+### What to build
+
+Layer 3, for the first time. `Sources/Gate/Gate.swift` holds the one
+`URLSession` call in the package: an OpenAI-compatible `/chat/completions` POST
+with one tool offered, `read_page(n)`. The loop that decides whether to go round
+again lives in layer 4 (`Sources/UI/Answered.swift`), because it needs both the
+`Document` the pages come from and the egress, and layer 2 may not import layer
+3 — an agent that opens a socket is a bug against **I1**, not a style issue.
+
+The panel is the first block in the rail. It names the host above the field,
+before anything is typed, and takes the grant once per document.
+
+### Acceptance criteria
+
+- [x] The open page's text goes out; the pages either side of it do not
+- [x] Values already recognised on that page travel with the question, quotes included
+- [x] `read_page` fetches a page the model was not shown, and the answer names it
+- [x] The hop loop is bounded at `Limits.askHops` and still returns a sentence (**I10**)
+- [x] Nothing reaches the transport before the reader grants it (**I1**)
+- [x] Opening another document drops the conversation *and* the grant (**I9**)
+- [x] A refused key, a 429 or an unparseable reply leaves the document untouched (**I6**)
+- [x] No `Finding` is minted from an answer, so **I2** is untouched
+- [x] The inspector's record names the page, its size and the host — never the words, the filename or the key (`coding-standards.md` §5.2)
+- [x] `rg 'URLSession|http' Sources | grep -v '^Sources/Gate/'` is empty
+
+### Stress test
+
+| Case | Must happen |
+|---|---|
+| **The header still says "Reads locally"** | It says it *conditionally*. Reading is local; asking is not. A chip that is true of one path and silently false of the other is the fallback-you-have-to-discover `project-overview.md` §3.1 rules out. |
+| **A model that only ever calls `read_page`** | Cut off at the bound, and the reader still gets a sentence saying why. An unbounded loop is an unbounded bill. |
+| A call for page 99 of a 3-page document | Answered with "that page is not available", not thrown. One bad call must not cost the turn. |
+| Endpoint returns 200 with an empty body | Not rendered as an answer — `project-overview.md` §9's "empty result dressed as success". |
+| No key in the environment | The panel says so and shows no field. A box that cannot send is worse than no box. |
+| **Typing `?` into the ask field** | The character appears. Before `opensList(typing:)` the global monitor swallowed it and opened the shortcuts sheet. |
+| A 45-page document, one question | One page of text leaves per hop, not 32,394 tokens of transcript. Check the payload, not the intent. |
+| Ask, then open another document mid-flight | The answer lands on nothing. The `requestID` generation check covers this await like every other one in `ReaderModel`. |
