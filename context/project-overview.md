@@ -136,13 +136,15 @@ hallucinate. That is the strongest thing this product has.
 
 ## 7. Scope
 
-Samples live in `assets/`. Two families work properly, a third degrades honestly:
+Samples live in `assets/`. Two families work properly, a third degrades honestly,
+and a fourth exists only to test scale:
 
 | Family | Files | Role |
 |---|---|---|
 | EPA pesticide labels | 6 PDFs in `assets/epa-labels/` | **Primary.** Dense, legally binding — application rates, restricted-entry intervals, PPE. Real consequences for misreading. |
 | IRS farm tax forms | Schedule F, 4835 in `assets/gov-forms/` | **Secondary.** Proves structured forms and two-column layouts, not just prose. |
 | NRCS conservation application | CPA-1200 in `assets/gov-forms/` | **Untuned.** If it works, bonus. If it half-works, that *is* the honesty demo. |
+| Long IRS publications | P17 (142pp), P946 (113pp), P225 (99pp) in `assets/long-docs/` | **Scale.** Everything else is ≤45 pages; these are the only inputs that say whether paging, indexing and memory hold at 100+ pages. |
 
 `assets/scans/` holds the same pages deliberately degraded, to force the OCR
 path. `assets/golden/` holds public labelled datasets used to check the pipeline
