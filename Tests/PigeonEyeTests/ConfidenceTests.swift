@@ -3,6 +3,7 @@ import Testing
 
 @testable import Contracts
 @testable import Tools
+@testable import UI
 
 // F3 slice 3.2 — the composite from `architecture.md` §12, and the rules that
 // make it unable to lie. The asymmetry is the whole feature: low confidence is a
@@ -176,4 +177,29 @@ func confidence_exactly_at_a_threshold_is_defined(score: Double, expected: Band)
         #expect(Confidence.compose(f.signals) != nil,
                 "\(f.label) carries no non-model signal, so it can never be scored")
     }
+}
+
+// MARK: - 9 · The ring says what it means
+
+/// A colour with no key is decoration, and a tooltip that repeats the number
+/// tells the reader nothing they cannot already see. The explanation is built
+/// from the *signals*, so it says why — which is the half of the composite the
+/// score cannot carry.
+@Test func the_tooltip_gives_the_reason_not_the_number_again() throws {
+    let failed = try #require(Confidence.compose(signals(ocr: 0.9, validator: 0)))
+    #expect(explain(failed).contains("never show as confirmed"),
+            "a failed format check did not say so: \(explain(failed))")
+
+    let confused = try #require(Confidence.compose(signals(ocr: 0.542, homoglyph: 1)))
+    #expect(explain(confused).contains("look-alike"),
+            "a homoglyph disagreement went unexplained: \(explain(confused))")
+
+    let clean = try #require(Confidence.compose(signals(ocr: 0.9, validator: 1, homoglyph: 0)))
+    #expect(explain(clean).hasPrefix("Confirmed."))
+    #expect(explain(clean).contains("alternative readings agree"))
+
+    // The score is reported, but never offered as the reason on its own.
+    let bare = try #require(Confidence.compose(signals(ocr: 0.885)))
+    #expect(explain(bare).contains("on its own is never enough"))
+    #expect(explain(bare).hasPrefix("Read, but nothing confirms it."))
 }

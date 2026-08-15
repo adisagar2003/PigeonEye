@@ -85,9 +85,75 @@ public struct ConfidenceRing: View {
             Text("\(Int((confidence.score * 100).rounded()))%")
                 .font(.mono(10.5)).foregroundStyle(colour)
         }
-        .help("\(Thresholds.word(confidence.score)) — \(confidence.signals.map(\.name).joined(separator: ", "))")
+        .help(explain(confidence))
         .accessibilityLabel(
-            "Confidence \(Int((confidence.score * 100).rounded())) percent, \(confidence.band.rawValue)")
+            "Confidence \(Int((confidence.score * 100).rounded())) percent, "
+            + "\(confidence.band.rawValue). " + explain(confidence))
+    }
+}
+
+/// What a ring means, in sentences, for the tooltip.
+///
+/// Built from the signals rather than from the score, because the score is
+/// exactly the part that cannot be trusted upward (`architecture.md` §12). The
+/// reader needs to know *why* something is or is not confirmed — showing them
+/// the same number twice tells them nothing.
+public func explain(_ confidence: Confidence) -> String {
+    func value(_ name: String) -> Double? {
+        confidence.signals.first { $0.name == name }?.value
+    }
+    var parts: [String] = []
+
+    switch confidence.band {
+    case .green: parts.append("Confirmed.")
+    case .amber: parts.append("Read, but nothing confirms it.")
+    case .red: parts.append("Doubtful — this is the kind of reading that gets escalated.")
+    }
+
+    switch value(Signal.validator) {
+    case 1: parts.append("It has the shape this kind of value should have.")
+    case 0: parts.append("It does not have the shape this kind of value should have, so it can never show as confirmed.")
+    default: break
+    }
+
+    switch value(Signal.homoglyph) {
+    case 1: parts.append("A second reading differs by look-alike characters (l/I, O/0) — the error that ruins names and numbers.")
+    case 0: parts.append("The alternative readings agree.")
+    default: break
+    }
+
+    if let ocr = value(Signal.ocr) {
+        parts.append(
+            "Text recognition scored it \(Int((ocr * 100).rounded()))%, which on its own is never enough — "
+            + "the four highest scores in this corpus were all misread checkboxes.")
+    }
+    return parts.joined(separator: " ")
+}
+
+/// What the three colours mean, said once, above the list.
+///
+/// A colour with no key is decoration. This is also the second carrier for
+/// readers who cannot separate the green from the amber: every swatch is
+/// labelled, so nothing here depends on hue alone.
+public struct ConfidenceLegend: View {
+    public init() {}
+
+    public var body: some View {
+        HStack(spacing: 13) {
+            key(.green, "confirmed")
+            key(.amber, "unconfirmed")
+            key(.red, "doubtful")
+        }
+        .help("How sure we are of our reading — never a judgement about the document itself.")
+    }
+
+    private func key(_ band: Band, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().stroke(Ink.band(band), lineWidth: 2).frame(width: 8, height: 8)
+            Text(label)
+                .font(.body(10)).tracking(0.3).textCase(.uppercase)
+                .foregroundStyle(Ink.neutral600)
+        }
     }
 }
 
