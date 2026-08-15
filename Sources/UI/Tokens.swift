@@ -112,6 +112,61 @@ public extension ButtonStyle where Self == Flat {
     static var flat: Flat { Flat() }
 }
 
+/// A list row that goes somewhere when clicked.
+///
+/// `Flat` is right for a control that already looks like one — a bordered label
+/// reads as a button before you touch it. A row of text does not, and the rail
+/// shipped two lists whose rows were indistinguishable from the transcript
+/// until you happened to click one.
+///
+/// Three signals, because the one that matters is the one visible *before* the
+/// mouse arrives: the pointer turns into a hand, the row fills under it, and
+/// `Chevron` sits at the trailing edge at rest. Hover and cursor are feedback;
+/// only the chevron is an affordance.
+public struct Row: ButtonStyle {
+    public func makeBody(configuration: Configuration) -> some View {
+        Hovering(configuration: configuration)
+    }
+
+    /// Hover is state, and a `ButtonStyle` cannot hold any — so the body is a
+    /// real `View` rather than the usual inline chain.
+    private struct Hovering: View {
+        let configuration: Configuration
+        @State private var hovering = false
+
+        var body: some View {
+            configuration.label
+                .contentShape(Rectangle())
+                // Behind the label, so a selected row keeps its accent fill
+                // while hovered rather than the two colours fighting.
+                .background(hovering ? Ink.neutral200 : .clear)
+                .opacity(configuration.isPressed ? Ink.pressedOpacity : 1)
+                .onHover { hovering = $0 }
+                .pointerStyle(.link)
+        }
+    }
+}
+
+public extension ButtonStyle where Self == Row {
+    static var row: Row { Row() }
+}
+
+/// The "this row goes somewhere" mark, at the trailing edge of a `Row`.
+///
+/// Typographic rather than an SF Symbol: there is not one symbol anywhere else
+/// in this app, and a single borrowed glyph reads as a different design system
+/// leaking in. Muted, because it repeats on every row and the value beside it
+/// is what the user came to read.
+public struct Chevron: View {
+    public init() {}
+    public var body: some View {
+        Text("›")
+            .font(.heading(15))
+            .foregroundStyle(Ink.neutral500)
+            .accessibilityHidden(true)
+    }
+}
+
 public extension View {
     func blueprint(stroke: Color = Ink.divider, marks: Color = Ink.text.opacity(0.55)) -> some View {
         modifier(Blueprint(stroke: stroke, marks: marks))
