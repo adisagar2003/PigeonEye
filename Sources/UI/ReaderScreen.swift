@@ -453,9 +453,10 @@ public struct ReaderScreen: View {
                                         .font(.body(11)).tracking(0.4).textCase(.uppercase)
                                         .foregroundStyle(Ink.neutral600)
                                     Spacer(minLength: 0)
-                                    if found.validated == true {
-                                        Text("checked")
-                                            .font(.mono(9.5)).foregroundStyle(Ink.accent700)
+                                    if let confidence = Confidence.compose(found.signals) {
+                                        ConfidenceRing(confidence)
+                                    } else {
+                                        UnscoredMark()
                                     }
                                 }
                                 Text(found.value ?? "—")

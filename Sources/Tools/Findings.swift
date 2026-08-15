@@ -87,12 +87,15 @@ public func findings(on page: Page, number: Int) async -> [Finding] {
         for format in Format.allCases {
             for match in line.text.matches(of: candidatePattern(for: format)) {
                 let quote = String(match.output)
+                let validated = validate(quote, using: format)
                 keep(
                     finding(
                         label: format.label, value: quote, quote: quote,
                         page: number, region: region,
-                        origin: .validator, validated: validate(quote, using: format),
-                        conf: Double(line.conf), in: page.transcript))
+                        origin: .validator, validated: validated,
+                        conf: Double(line.conf),
+                        signals: signals(for: quote, line: line, validated: validated),
+                        in: page.transcript))
             }
         }
 
@@ -106,10 +109,62 @@ public func findings(on page: Page, number: Int) async -> [Finding] {
                     // A detector reports what it parsed; it ran no format rule,
                     // so `validated` is unknown rather than false (§11).
                     origin: .datadetector, validated: nil,
-                    conf: Double(line.conf), in: page.transcript))
+                    conf: Double(line.conf),
+                    signals: signals(for: quote, line: line, validated: nil),
+                    in: page.transcript))
         }
     }
     return found
+}
+
+/// Characters OCR confuses for one another. Measured in this corpus, not
+/// imported from a general Unicode confusables table: `lan Murphy` for
+/// `Ian Murphy`, `524-S29` for `524-529`.
+///
+/// ponytail: single characters only. `rn`→`m` is the classic multi-character
+/// confusion and is not covered — it needs alignment rather than a positional
+/// walk, and no reading in the corpus has hit it yet.
+private let homoglyphClasses: [Set<Character>] = [
+    ["l", "I", "1", "|"], ["O", "o", "0"], ["S", "5"], ["Z", "2"],
+    ["B", "8"], ["G", "6"], ["q", "9"], ["g", "9"],
+]
+
+/// Do two readings differ *only* by characters OCR is known to confuse?
+///
+/// This is the signal per-line confidence missed entirely. `lan Murphy` scored a
+/// comfortable 0.542 — nothing in the number says anything is wrong — while
+/// candidate #2 was the correct `Ian Murphy`. `l`/`I` and `O`/`0` are precisely
+/// the failure mode on names, dates and registration numbers, which is to say on
+/// every value this product exists to get right.
+public func differsOnlyByHomoglyph(_ a: String, _ b: String) -> Bool {
+    guard a != b else { return false }
+    let left = Array(a), right = Array(b)
+    guard left.count == right.count else { return false }
+
+    for (x, y) in zip(left, right) where x != y {
+        guard homoglyphClasses.contains(where: { $0.contains(x) && $0.contains(y) }) else {
+            return false
+        }
+    }
+    return true
+}
+
+/// The signals `architecture.md` §12 ranks, for one reading of one line.
+///
+/// The homoglyph signal is only emitted when there are alternative readings to
+/// compare — absent means "not checked", which the composite treats differently
+/// from "checked and clean". Silence and a clean bill of health are not the same
+/// claim.
+private func signals(for quote: String, line: Line, validated: Bool?) -> [Signal] {
+    var out = [Signal(Signal.ocr, Double(line.conf))]
+    if let validated { out.append(Signal(Signal.validator, validated ? 1 : 0)) }
+
+    let others = line.alts.filter { $0 != line.text }
+    if !others.isEmpty {
+        let confused = others.contains { differsOnlyByHomoglyph(line.text, $0) }
+        out.append(Signal(Signal.homoglyph, confused ? 1 : 0))
+    }
+    return out
 }
 
 /// **The single construction point for a `Finding`, and the only one.**
@@ -124,6 +179,7 @@ func finding(
     label: String, value: String?, quote: String,
     page: Int, region: Region?,
     origin: Origin, validated: Bool?, conf: Double,
+    signals: [Signal] = [],
     in transcript: String
 ) -> Finding? {
     guard !quote.isEmpty, transcript.contains(quote) else { return nil }
@@ -135,5 +191,5 @@ func finding(
         id: "\(origin.rawValue):\(page):\(label):\(quote):\(where_)",
         label: label, value: value, conf: conf, quote: quote,
         page: page, region: region, validated: validated,
-        origin: origin, signals: [], unresolved: false)
+        origin: origin, signals: signals, unresolved: false)
 }

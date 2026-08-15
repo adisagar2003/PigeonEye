@@ -14,16 +14,17 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
-**F3 slice 3.1 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
+**F3 slice 3.2 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
 by the file, and a form's field list is read straight out of the AcroForm with
 page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
 cryptic IRS field names) is deliberately deferred — see the decision log.
 
-The current row is **3.1 · deterministic findings**
-(`features/03-findings-you-can-trust.md`): format validators and Vision's data
-detectors, each finding carrying value, quote, page, region and origin, with
-**I2**'s substring check at the single construction point. No confidence ring —
-that is 3.2.
+The current row is **3.2 · a confidence ring that can't lie**
+(`features/03-findings-you-can-trust.md`): the composite from
+`architecture.md` §12 and the ring that renders it. Slice **3.1** is complete —
+format validators and Vision's data detectors, each finding carrying value,
+quote, page, region and origin, with **I2**'s substring check at the single
+construction point.
 
 F1 is built, reviewed and corrected. The app opens a PDF or a scan, renders it,
 OCRs every page and shows the transcript — locally, with no Gate layer in the
@@ -315,6 +316,33 @@ AcroForm widgets, so scoring against them needs a rig that fabricates
 pseudo-widgets from FUNSD's annotation boxes; that is a slice of its own, and the
 `ocr_bench.py` corpus globbing would need rewriting with it.
 
+### F3.2 — the homoglyph signal is specific, and that is what makes it usable
+
+Measured over all 1092 lines in `assets/scans/` via `./ocr --json`:
+
+| | lines | share |
+|---|---|---|
+| Total | 1092 | — |
+| Carry *some* candidate disagreement | 1024 | **93.8%** |
+| Carry a **homoglyph** disagreement | 8 | **0.7%** |
+
+Worst single page 4.3% (`000524-00549-...-01.jpg`, 2 of 47 lines).
+
+That gap is the measurement behind `architecture.md` §12's ranking: raw
+candidate disagreement is "low, too noisy as a binary" because it fires on 15 of
+every 16 lines, while the homoglyph filter fires on 1 in 128. A signal that flags
+almost everything cannot trigger escalation — F5 would send whole documents, and
+escalating everything is a failure rather than caution. `the_homoglyph_signal_
+flags_few_enough_lines_to_be_a_signal` holds a ceiling at 15% so a future
+widening of the character classes cannot quietly turn the signal back into an
+alarm.
+
+**A consequence worth naming before 3.3 picks thresholds:** the corpus maximum
+line confidence is **0.885** and the placeholder green cut is **0.85**, so almost
+nothing can currently reach green even with a validator pass. That is the right
+failure direction — it under-claims — but it means the ring is effectively
+two-state until 3.3 measures the real numbers.
+
 ### Local reasoning — need much less of it than assumed
 
 `SystemLanguageModel.default.availability` on this machine returns
@@ -512,7 +540,7 @@ relative-deadline arithmetic, no per-item confidence labels, English/US-UK only.
 | # | Question | Why it blocks |
 |---|---|---|
 | 1 | **UI shell — native SwiftUI or Tauri?** `architecture.md` argues native, but that argument rested on Apple-only AI tiers. With a portable tool layer that premise is gone, so Tauri is now genuinely defensible: you rebuild PDF render + annotation on pdf.js, and get Windows/Linux with no Apple dependency anywhere. Native is still faster for the hackathon. | Decides the whole frontend |
-| 2 | **Demo hardware** — this 16 GB Air, or something with 32 GB+? | Decides whether any local model tier is possible at all, and whether mere.run is worth revisiting |
+| 2 | ~~**Demo hardware**~~ — **decided**: the first iteration is cloud-only on the OpenAI key. A local tier stays an *option* behind the same swappable base URL, not a shipping requirement, so demo hardware no longer blocks anything. Slice 4.3 becomes a measurement, not a gate | closed |
 | 3 | **Export format** — Markdown checklist, CSV, or JSON? | Small, but it's the app's only write |
 | 4 | **Confidence thresholds** — escalate point, amber/red split | Measure against `assets/scans/` and `assets/golden/`, don't guess |
 | 5 | **Page window** — the EPA label is **45 pages**; a 2-page default misses the application rates entirely | Needs a real page-selection strategy, not a constant |
@@ -569,6 +597,7 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **`eval/` stays Python and stays at the root level** — it is measurement, not a layer, and `assets/golden/` + the four metrics have no Swift equivalent worth writing | mine |
 | **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
 | **I2 is enforced at one construction point in `Tools`, not per caller** — a caller cannot invent a quote because a caller cannot build a `Finding` any other way. A quote absent from the transcript yields nil rather than throwing, so one bad line does not cost the page its other findings | mine |
+| **First iteration is cloud-only, on the OpenAI key.** A local model tier remains an option behind the same OpenAI-compatible base URL, offered rather than required. Closes open question 2 and turns 4.3 from a gate into a measurement — nothing in F3 or F4.1 changes, because both are deterministic and make no model call at all | yours |
 | **Search patterns are looser than validation patterns** — one pattern for both drops `10.5 0Z` (OCR for `10.5 oz`) entirely, so the user is never told the rate exists. Find it and fail it; discarding it is the app deciding for the reader | mine, from the F3 review |
 | **`Finding` is `Encodable` with a `package` initialiser** — a public init or a synthesised `Decodable` is a second way in with no transcript to check against, which would make I2 a comment rather than a rule | mine, from the F3 review |
 | **Validators whole-match rather than contain** — `R G-2 26-O4871` is a real Vision misread from this corpus, and a containment check passes it the moment any fragment looks like a registration number | measurement |

@@ -147,6 +147,70 @@ than throwing: one bad line must not cost the page its other findings.
 
 ---
 
+---
+
+# Slice 3.2 — a confidence ring that can't lie
+
+## 3.2.1 The two rules, and why they are not symmetrical
+
+From `architecture.md` §12, and the asymmetry *is* the feature:
+
+1. **Low confidence is a reliable trigger.** Genuine garbage clusters at the
+   bottom — `WEAL PROTEIN` scored 0.062, 2nd lowest of 1092 lines. Below the
+   escalate point is red.
+2. **High confidence is not a licence to show green.** The four *highest* scores
+   in the same corpus (0.885, 0.828, 0.824, 0.788) were all `口`, checkbox
+   artifacts read as CJK glyphs. Green needs a reason beyond the score: a format
+   validator passed, or the top candidates agree without a homoglyph
+   substitution.
+
+**I3** is the clamp: a failed validator can never render green, whatever the OCR
+score, because a failed deterministic check is knowledge and no score argues
+against it. **I4** is the floor: with nothing but the model's own self-report the
+finding is **not scored** — not scored low. Those are different claims, and the
+UI says `not scored` rather than painting a 0% ring.
+
+## 3.2.2 What the homoglyph signal cost to make usable
+
+| | lines | share |
+|---|---|---|
+| Total in `assets/scans/` | 1092 | — |
+| *Some* candidate disagreement | 1024 | **93.8%** |
+| **Homoglyph** disagreement | 8 | **0.7%** |
+
+A signal that fires on 15 of every 16 lines cannot trigger escalation. Filtered
+to homoglyph classes it fires on 1 in 128, worst page 4.3%. That gap is why §12
+ranks raw disagreement low and this high — and why the test holds a ceiling at
+15%, so widening the character classes cannot quietly turn a signal back into an
+alarm.
+
+## 3.2.3 Acceptance criteria (slice 3.2)
+
+- [x] Validator failure clamps below green whatever the OCR score (**I3**) — **tested**, `a_failed_validator_can_never_render_green` over five scores
+- [x] Composite requires ≥1 non-model signal (**I4**) — **tested**, `a_finding_with_only_model_self_report_cannot_be_scored`
+- [x] `WEAL PROTEIN` at 0.062 renders red — **tested**
+- [x] `lan Murphy` at 0.542 is flagged because candidate #2 is `Ian Murphy` — **tested**, `a_homoglyph_alternative_is_flagged`
+- [x] Thresholds read from one `Thresholds` value — the composite is the only reader, and `scripts/layers.sh` keeps literals out of views
+
+## 3.2.4 Stress test
+
+| Case | Must happen |
+|---|---|
+| **The four `口` lines** at 0.885 / 0.828 / 0.824 / 0.788 | None renders green. **Tested** — `the_high_end_of_ocr_confidence_does_not_license_green`, table-driven over all four real scores. |
+| **Every finding on the degraded scan through the composite** | None green without a validator pass or clean candidates. **Tested** — `no_real_finding_is_green_without_earning_it`. |
+| **An all-caps page** (`0`/`O`, `I`/`l` everywhere) | False-flag rate recorded: 0.7% of all lines, 4.3% worst page. **Tested** with a 15% ceiling. |
+| Confidence exactly at a threshold | Defined, not a `<` vs `<=` accident. **Tested** — at `escalate` it is amber, at `confident` it is green, one thousandth below `escalate` it is red. |
+| A finding with model self-report only | Cannot be scored at all. **Tested** — the UI renders `not scored`, never a 0% ring. |
+
+## 3.2.5 Known ceiling
+
+The corpus maximum line confidence is **0.885** against a placeholder green cut
+of **0.85**, so green is nearly unreachable today. The ring under-claims, which
+is the right direction to be wrong — but it is effectively two-state until slice
+**3.3** measures the real cut points. Carried, not hidden.
+
+---
+
 ## 7. Out of scope for 3.1
 
 The confidence composite and its ring (3.2), thresholds (3.3), the
