@@ -14,7 +14,7 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
-**F3 slice 3.2 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
+**F4 slices 4.1 and 4.2 are complete.** F2 slice 2.1 is complete: the mode is decided
 by the file, and a form's field list is read straight out of the AcroForm with
 page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
 cryptic IRS field names) is deliberately deferred — see the decision log.
@@ -55,8 +55,8 @@ feature has a spec under `context/features/`. One source of truth, per
 | F1 | Read it locally | [`features/01-read-it-locally.md`](features/01-read-it-locally.md) | **complete** |
 | F2 | Form mode | [`features/02-form-mode.md`](features/02-form-mode.md) | **partial** — 2.1 complete, 2.2 deferred |
 | F3 | Findings you can trust | [`features/03-findings-you-can-trust.md`](features/03-findings-you-can-trust.md) | **in progress** — 3.1 |
-| F4 | Explain it | — | not started |
-| F5 | Escalate with consent | — | not started |
+| F4 | Explain it | [`features/04-explain-it.md`](features/04-explain-it.md) | **partial** — 4.1 and 4.2 complete, 4.3 open |
+| F5 | Escalate with consent | — | not started — **but layer 3 now exists**, see F4.2 |
 | F6 | Fail honestly | — | not started |
 | F7 | Inspector mode | — | partial (step log shipped in F1) |
 | F8 | Export | — | not started |
@@ -597,6 +597,9 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **`eval/` stays Python and stays at the root level** — it is measurement, not a layer, and `assets/golden/` + the four metrics have no Swift equivalent worth writing | mine |
 | **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
 | **I2 is enforced at one construction point in `Tools`, not per caller** — a caller cannot invent a quote because a caller cannot build a `Finding` any other way. A quote absent from the transcript yields nil rather than throwing, so one bad line does not cost the page its other findings | mine |
+| **`Sources/Gate` exists as of F4.2, and the trust claim changed shape with it.** It was "there is no egress API, checkable with one grep"; it is now "there is exactly one, and it is a file you can read in full". `scripts/layers.sh` is what keeps that true — it caught a `URLSession` default argument in layer 4 during this very slice | consequence |
+| **Agent does not depend on Gate and must not.** The additive-only fallback lives in UI, the only layer allowed to see both. An agent that opens a socket is a bug against I1, not a style issue | mine |
+| **The consent moment in cloud tier is the button press.** The grant is taken for the whole document (`project-overview.md` §4.1), the button states what leaves before it is pressed, and nothing is sent on open | yours, applied |
 | **First iteration is cloud-only, on the OpenAI key.** A local model tier remains an option behind the same OpenAI-compatible base URL, offered rather than required. Closes open question 2 and turns 4.3 from a gate into a measurement — nothing in F3 or F4.1 changes, because both are deterministic and make no model call at all | yours |
 | **Search patterns are looser than validation patterns** — one pattern for both drops `10.5 0Z` (OCR for `10.5 oz`) entirely, so the user is never told the rate exists. Find it and fail it; discarding it is the app deciding for the reader | mine, from the F3 review |
 | **`Finding` is `Encodable` with a `package` initialiser** — a public init or a synthesised `Decodable` is a second way in with no transcript to check against, which would make I2 a comment rather than a rule | mine, from the F3 review |

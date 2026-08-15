@@ -2,6 +2,7 @@ import Agent
 import Contracts
 import CoreGraphics
 import Foundation
+import Gate
 import Observation
 
 /// Everything the reader screen knows. Layer 4 — it holds no reading logic of
@@ -79,6 +80,35 @@ public final class ReaderModel {
     public private(set) var notice: String?
     private var noticeID = UUID()
 
+    /// What the document is. Present as soon as one is read, because it is
+    /// assembled locally with no model call — **I6**, and the reason a missing
+    /// key never blanks the screen.
+    public private(set) var explanation: Explanation?
+    public private(set) var asking = false
+
+    /// `nil` when there is no key in the environment, and the UI then offers
+    /// nothing. A button that cannot work is worse than no button.
+    public let cloud: Gate.Config? = Gate.Config.fromEnvironment(ProcessInfo.processInfo.environment)
+
+    /// Send the transcript and the recognised values to the model.
+    ///
+    /// **Nothing here runs on open.** The reader presses a button that says what
+    /// leaves, and that press is the consent — `project-overview.md` §4.1 takes
+    /// the grant for the whole document rather than per crop, and this is where
+    /// it is taken. Any failure returns the local reading with the reason
+    /// attached, never an empty screen (**I6**).
+    public func explainWithCloud() async {
+        guard let doc, let cloud, !asking else { return }
+        let id = requestID
+        asking = true
+        let result = await explained(doc, config: cloud)
+        // The same generation check as every other await in this file: a read
+        // started after this one must not be overwritten by its answer.
+        guard requestID == id, self.doc?.url == doc.url else { return }
+        explanation = result
+        asking = false
+    }
+
     public func open(_ url: URL) async {
         // Already read, or already reading. A second pass costs ~15s and cannot
         // return anything different, and because the pane is blanked first, it
@@ -100,6 +130,8 @@ public final class ReaderModel {
         zoom = 1
         selectedField = nil
         selectedFinding = nil
+        explanation = nil
+        asking = false
 
         do {
             let document = try await read(url) { [weak self] done, total in
@@ -117,6 +149,9 @@ public final class ReaderModel {
             }
             guard requestID == id else { return }
             doc = document
+            // Local, immediate, no model call. The screen says something true
+            // before anything has been offered the chance to leave the machine.
+            explanation = explain(document)
             phase = .ready
             await loadPageImage()
         } catch let failure as ReadFailure {
