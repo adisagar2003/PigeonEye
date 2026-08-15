@@ -42,6 +42,24 @@ public final class ReaderModel {
     public var transcriptOpen = false
     public var inspectorOpen = false
 
+    /// Which question the findings panel is answering.
+    public enum FindingsTab: String, CaseIterable, Identifiable {
+        /// What is on the page in front of you — the F3 demo beat.
+        case thisPage = "This page"
+        /// Where does this document say X — the index, searchable.
+        case everything = "Whole document"
+
+        public var id: String { rawValue }
+    }
+
+    public var findingsTab: FindingsTab = .thisPage
+    /// The index search box. Cleared on open, like every other per-document
+    /// state here — a query from the last document filtering this one is the
+    /// same class of wrong as showing the last document's page.
+    public var query = ""
+    /// The active kind chip, or nil for all of them.
+    public var kindFilter: Kind?
+
     /// True when the page on screen is one that could not be rendered. A failed
     /// page has no image, and "no image" is otherwise indistinguishable from
     /// "still rendering" — see `ReaderScreen.pageView`.
@@ -306,6 +324,10 @@ public final class ReaderModel {
         sends = []
         explanation = nil
         asking = false
+        // The index's filters belong to it too — a query typed against the last
+        // document finds nothing in this one, and reads as a broken search box.
+        query = ""
+        kindFilter = nil
 
         do {
             let document = try await read(url) { [weak self] done, total in
@@ -344,7 +366,11 @@ public final class ReaderModel {
     /// Show a message and take it away again. Generation-token clearing for the
     /// same reason `requestID` exists: two presses in quick succession must not
     /// let the first one's timer wipe the second one's message.
-    private func flash(_ message: String) {
+    ///
+    /// Public because the export in `ReaderScreen` reports through it — an
+    /// export that succeeds or fails silently is the same kind of wrong as a
+    /// click that produces nothing, which is why this notice exists at all.
+    public func flash(_ message: String) {
         let id = UUID()
         noticeID = id
         notice = message
@@ -376,6 +402,7 @@ public final class ReaderModel {
     public func select(_ field: Field) {
         selectedField = field
         selectedFinding = nil
+        selectedIndexEntry = nil
         if page != field.page { page = field.page }
     }
 
@@ -383,8 +410,28 @@ public final class ReaderModel {
     public func select(_ found: Finding) {
         selectedFinding = found
         selectedField = nil
+        selectedIndexEntry = nil
         if page != found.page { page = found.page }
     }
+
+    /// Jump to the next place the document says this, wrapping at the end.
+    ///
+    /// An index row stands for every occurrence of one value, so "go to it" is
+    /// only well-defined relative to where you already are. Re-clicking a row
+    /// that lists seven pages walks them; a row that goes nowhere on the second
+    /// click reads as broken.
+    public func select(_ entry: IndexEntry) {
+        // From nowhere-in-particular the first occurrence is the answer; from a
+        // page this value is already on, the next one after it.
+        let from = selectedIndexEntry == entry.id ? page : nil
+        select(entry.occurrence(after: from))
+        selectedIndexEntry = entry.id
+    }
+
+    /// Which index row is lit. Kept alongside `selectedFinding` because one row
+    /// covers many findings, and the row must stay lit while its occurrences are
+    /// walked.
+    public private(set) var selectedIndexEntry: String?
 
     private func loadPageImage() async {
         guard let document = doc, page >= 1, page <= document.navigablePageCount else {

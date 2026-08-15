@@ -100,6 +100,41 @@ The current row is **3.2 · a confidence ring that can't lie**
 format validators and Vision's data detectors, each finding carrying value,
 quote, page, region and origin, with **I2**'s substring check at the single
 construction point.
+**F3 slice 3.4 is `complete` — the findings index, and the filters behind it.**
+Reading 3.1's output over all of `assets/` is what produced the slice: 8,421
+findings, and the three defects below were all the same defect, which is that a
+shape was doing a job only context can do. The filters and the index shipped as
+one unit on purpose — a search box over 8,421 rows of noise finds noise faster.
+
+**F3 slice 3.2 is `complete`** — the composite from `architecture.md` §12, the
+ring that renders it, and the legend that says what its colours mean (PR #15).
+3.4 neither blocked it nor was blocked by it; they were built in parallel and
+the ring is what the index's rows now carry. 3.3 (thresholds) is still open, and
+until it lands the green cut is a placeholder the corpus barely reaches —
+`features/03-findings-you-can-trust.md` § "Known ceiling" carries that.
+
+**F8 slice 8.1 is `complete`, and it was taken out of order.** `issues.md`
+blocks 8.1 on 4.1 and F4 is not started; the row was built anyway, on request,
+because everything it writes out — findings, fields, pages-read — exists today.
+What does **not** exist is tier-1 prose (`doc_type`, `what_it_is`, `summary`,
+`urgency`, `next_steps`), so the export omits those five fields. **4.1 must add
+them to `Tools.exported` when it lands** — the arguments are already the seam to
+add them at, and this is the debt the reorder bought.
+
+F3 slice 3.1's code is merged (PR #14) and its row below still says
+`in progress`; it is not this unit's to close.
+
+**Onboarding asks which model reads the document, and defaults to OpenAI**
+(PR #16), and since F9 the choice decides something: `ReaderModel.honour` reads
+it, and "On this Mac" answers questions in-process. What it still does not buy
+is tier-1 prose — no `doc_type`, `what_it_is`, `summary`, `urgency` or
+`next_steps` exists at either tier until F4 lands, which is why 8.1's export
+omits those five fields.
+
+F2 slice 2.1 is complete: the mode is decided by the file, and a form's field
+list is read straight out of the AcroForm with page and rect
+(`features/02-form-mode.md`). Slice **2.2** (human labels for cryptic IRS field
+names) is deliberately deferred — see the decision log.
 
 F1 is built, reviewed and corrected. The app opens a PDF or a scan, renders it,
 OCRs every page and shows the transcript — locally, with no Gate layer in the
@@ -132,9 +167,12 @@ feature has a spec under `context/features/`. One source of truth, per
 | F3 | Findings you can trust | [`features/03-findings-you-can-trust.md`](features/03-findings-you-can-trust.md) | **in progress** — 3.1 |
 | F4 | Explain it | [`features/04-explain-it.md`](features/04-explain-it.md) | **partial** — 4.1 and 4.2 complete, 4.3 open |
 | F5 | Escalate with consent | — | not started — **but layer 3 now exists**, see F4.2 |
+| F3 | Findings you can trust | [`features/03-findings-you-can-trust.md`](features/03-findings-you-can-trust.md) | **in progress** — 3.1, 3.2 and 3.4 complete, 3.3 open |
+| F4 | Explain it | — | not started |
+| F5 | Escalate with consent | — | not started |
 | F6 | Fail honestly | — | not started |
 | F7 | Inspector mode | — | partial (step log shipped in F1; the egress ledger shipped in F9) |
-| F8 | Export | — | not started |
+| F8 | Export | — | **complete** — 8.1, built out of order (see Current phase) |
 | F9 | Ask about this page | [`features/09-ask-about-this-page.md`](features/09-ask-about-this-page.md) | **complete** — 9.1, built out of order (see Current phase) |
 
 The old stage numbers survive where they are load-bearing: `coding-standards.md`
@@ -154,6 +192,100 @@ The old stage numbers survive where they are load-bearing: `coding-standards.md`
 | **The origin flip is load-bearing, and now proven** | Reverted to Vision's lower-left origin on purpose: the letterhead read `y = 0.9375` instead of `0.046`, and a crop of the *last* line on the page came back as `"january 11, 2017"` — the mirrored position at the top. That is F5 sending a region the user never approved, and it is caught by one test. |
 | **The seal misread reproduces** | `WEAL PROTECTED` at conf **0.08** on `007969-00242-...-01.jpg`, matching the 0.062 recorded below. The low end of Vision's confidence is trustworthy. |
 | **The CLI contract survived the move** | `spikes/page_index.py` still reports 45 pages, a 1,426-token index at 32/page against 32,394 tokens of full text — identical to the numbers below. |
+
+### F8 — what building the export measured
+
+| | |
+|---|---|
+| **The clean EPA page exports 9 findings** | 4 dates/windows, 2 addresses, 1 registration number, and the duplicate pairs a data detector and a validator both find. 1.0 KB CSV, 5.2 KB JSON, 1.2 KB text, 15.4 KB PDF — all four written from one read, verified by opening the PDF |
+| **109 rows do not fit on one page** | A 105-field form paginates to more than one PDF page. Asserted with `PDFDocument.pageCount`, because a paginator that draws one frame and drops the overflow produces a valid, complete-looking, truncated file |
+| **The JSON is byte-stable** | `.sortedKeys` — two exports of one document diff clean, which is the property that makes an export worth keeping |
+
+### F3 slice 3.4 — what reading 3.1's own output measured
+
+Every document in `assets/` through the shipping path, every finding dumped to a
+TSV (`Tests/PigeonEyeTests/CorpusDumpTests.swift`, gated on `CORPUS_DUMP` so it
+never runs in an ordinary `swift test`). 12 PDFs and 18 scans, **8,421
+findings**. Nothing here was visible from reading the code.
+
+**The registration validator was 88% wrong, and said *checked* every time.**
+
+| | before | after |
+|---|---|---|
+| Distinct values labelled `EPA reg. no.` across the corpus | **131** | **7** |
+| On IRS P17, a tax guide with no EPA anywhere in it | 42 | 0 |
+| Pages the real `35915-4` is found on | 30 | 30 |
+
+The seven that survive are the seven the corpus contains: `524-529`, `524-549`,
+`524-522`, `7969-186`, `7969-242`, `35915-4`, `66330-424`. What went is phone
+numbers (`1-800-424-9300`, `314-694-4000`), IRS notice and revenue-procedure
+numbers (`2021-48`, `2010-33`), OMB numbers (`1545-0074`), ZIP+4
+(`20250-9410`) and EPA establishment numbers (`2008-04-088-0099`). Each one
+carried the *checked* badge, because passing the shape is exactly what checked
+claimed — **a wrong answer wearing the highest-trust signal in §12**, which is
+the most dangerous shape a defect can take in this product.
+
+`\b\d{3,5}-\d{1,5}\b` cannot be tightened into precision; a five-digit-dash-
+five-digit number is a common string. The precision lives in the words on the
+line. Hence `Format.cues` — and it gates the *name*, never the value.
+
+**Then the same dump was read the other way round, and that is what made it
+three wordings.** A precision number alone would have shipped a regression:
+
+| The line | What one wording cost | Group it needed |
+|---|---|---|
+| `Admin Number: 524-529` | EPA's **cover letters** word it differently from its labels. `524-529` fell from 8 pages to 4, and a **single-page scan** of that letter lost it outright — a one-page document has no other page to recover from | `admin` + `number` |
+| `BPA Registration Number: 35915-4` | OCR read the E as a B at conf 0.668. This was written into the stress table as a *risk* before it was found happening | `registration` + `number` |
+
+Loosening cost nothing measurable. Over the born-digital text of the whole
+corpus — **40,833 lines**, the three IRS publications included — all three groups
+together claim **6 distinct values and 0 wrong ones**. The word carrying the
+claim is `registration`/`reg`; **`epa` was never the load-bearing half**, and only
+the recall pass could have shown that.
+
+Residual, and deliberate: a bare `524-529` in a page header carries no wording at
+all and is not claimed — 6 of its 8 pages. The value is never lost, because the
+index groups across the document. Carried as a `ponytail:` ceiling in
+`Tools/Findings.swift`; the upgrade is document-level confirmation, which needs a
+pass over all pages and so belongs in `Agent`.
+
+**Half the findings were the same fact said twice.**
+
+| Collision | rows |
+|---|---|
+| `Amount` (validator) and `moneyAmount` (detector), same value, same region | 4,030 → **2,076** |
+| `Application rate` and `measurement` | 103 pairs on the EPA labels alone |
+| `Date` and `calendarEvent` | 30 pairs |
+
+On 120 pages of IRS P17 the validator found 693 amounts and the detector found
+695 of the same ones. Merging on value + region, validator wins.
+
+**80 of 114 `calendarEvent` matches contained no date.** `1.6-2.4`, `1.6 to 3.2`
+and `0.07 - 0.10` off the EPA rate tables; bare `Saturday` and `Sunday` off the
+tax guide. They landed in the one group a reader opens to find a deadline.
+
+**The whole corpus, before and after:**
+
+| | before | after |
+|---|---|---|
+| Findings | 8,421 | **5,778** (−31.4%) |
+| Rows carrying *checked* | 4,405 | 4,120 |
+| Index rows (distinct values) | — | **2,408** |
+
+Read these to ±1%: Vision is not deterministic run to run, and three dumps of the
+same corpus differed by ~20 rows in 5,800. The 131 → 7 is not in that band.
+
+**And the reason the index exists at all:**
+
+| Document | pages read | findings | index rows |
+|---|---|---|---|
+| IRS P17 federal income tax | 120 | 1,279 | **512** |
+| IRS P225 farmer's tax guide | 120 | 1,593 | 539 |
+| IRS P946 depreciating property | 120 | 1,593 | 732 |
+| `000524-00529` Roundup PRO | 45 | 301 | 156 |
+
+P17 was **2,064 findings before this slice** — 17 a page. A per-page list is not
+an answer to "when is this due", and no amount of scrolling makes it one.
 
 ### Dry run over all of `assets/` — OCR loses the rate tables
 
@@ -617,10 +749,14 @@ relative-deadline arithmetic, no per-item confidence labels, English/US-UK only.
 |---|---|---|
 | 1 | **UI shell — native SwiftUI or Tauri?** `architecture.md` argues native, but that argument rested on Apple-only AI tiers. With a portable tool layer that premise is gone, so Tauri is now genuinely defensible: you rebuild PDF render + annotation on pdf.js, and get Windows/Linux with no Apple dependency anywhere. Native is still faster for the hackathon. | Decides the whole frontend |
 | 2 | ~~**Demo hardware**~~ — **decided**: the first iteration is cloud-only on the OpenAI key. A local tier stays an *option* behind the same swappable base URL, not a shipping requirement, so demo hardware no longer blocks anything. Slice 4.3 becomes a measurement, not a gate | closed |
-| 3 | **Export format** — Markdown checklist, CSV, or JSON? | Small, but it's the app's only write |
-| 4 | **Confidence thresholds** — escalate point, amber/red split | Measure against `assets/scans/` and `assets/golden/`, don't guess |
-| 5 | **Page window** — the EPA label is **45 pages**; a 2-page default misses the application rates entirely | Needs a real page-selection strategy, not a constant |
-| 6 | **Wording of the import-time disclosure** in cloud tier, and whether declining it leaves a usable offline run or refuses the document outright | It is now the *only* consent moment in cloud tier, so it carries the whole trust story |
+| 3 | **Confidence thresholds** — escalate point, amber/red split | Measure against `assets/scans/` and `assets/golden/`, don't guess |
+| 4 | **Page window** — the EPA label is **45 pages**; a 2-page default misses the application rates entirely | Needs a real page-selection strategy, not a constant |
+| 5 | **Wording of the import-time disclosure** in cloud tier, and whether declining it leaves a usable offline run or refuses the document outright | It is now the *only* consent moment in cloud tier, so it carries the whole trust story |
+
+The export-format question is **closed** by 8.1 — JSON, CSV, plain text and PDF,
+all four, Markdown dropped. Renumbering it away makes two stale references
+correct: `Contracts.Thresholds` and `issues.md` 3.3 both already said "open
+question 3" when they meant thresholds, and thresholds is now #3.
 
 Distribution to pick thresholds against: 1092 real lines, min 0.054, p05 0.342,
 median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
@@ -689,6 +825,15 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Boundary A is deterministic and document-stateless, but not freely parallelisable** — the process-wide Vision gate is part of the contract, so a future caller cannot fan out and rediscover the crash | consequence of the PR #9 review |
 | **Every `ReaderModel` state write is guarded by request *and* phase** — `requestID` alone only rejects a different open; a progress event from the current read could still land after `.ready` | consequence of the PR #9 review |
 | **`ReaderModel` takes its reader as an init parameter** — the only way to test a completion-order race is to hold the progress handler and call it late. Production always gets `Agent.read` | consequence of the PR #9 review |
+| **Export is all four formats — JSON, CSV, plain text, PDF — and Markdown is dropped.** The open question offered one of three; the answer is that the choice belongs to the reader, not to us. A caseworker wants the PDF, a spreadsheet wants the CSV, another tool wants the JSON, and the plain text is what survives being pasted into an email. Markdown is none of those: it is a source format for something else to render | yours |
+| **The export is `Finding` and `Field` only, never the transcript** — the footer's own words are "findings only, never document bytes", and the transcript is the document. Quotes carry the provenance without carrying the file | mine |
+| **CSV cells are formula-neutralised** — a leading `=`, `+` or `@` gets an apostrophe. Values are verbatim OCR of a document nobody here controls, and a spreadsheet executes them on open. `-` is left armed on purpose: `-1.6` is a rate | mine |
+| **A shape is not a claim — `Format.cue` gates the name, never the value.** `\b\d{3,5}-\d{1,5}\b` matched 78 distinct values across `assets/` and 9 were registration numbers; the other 69 rendered *checked*. The words on the line are what carry the claim, and rejecting one does not discard the value — the producer that legitimately found it still reports it | measurement |
+| **One value in one place is one row, and the validator wins the merge** — `Amount` 693 / `moneyAmount` 695 over the same 120 pages of IRS P17 is one fact said twice, and the detector's copy is the one with no verdict on it | measurement |
+| **A `calendarEvent` with no date in it is not a date** — 80 of 114 matches were rate ranges (`1.6-2.4`, `0.07 - 0.10`) or bare weekdays, landing in the one group a reader opens to find a deadline | measurement |
+| **`Kind` is a layer-0 type, and `Finding` carries it** — deciding that `moneyAmount` and `Amount` answer one question is domain knowledge; a view that decided it would be layer 1's vocabulary in layer 4 | mine |
+| **The findings panel gets a second tab rather than replacing the first** — the per-page list is the F3 demo beat and answers "what is on this page"; the index answers "where does this document say X", which is the only answerable question at 2,064 findings over 120 pages | yours |
+| **The index groups by value and walks occurrences on repeated clicks** — one row per distinct value with the pages it appears on, wrapping at the end. A row that lists seven pages and goes dead on the seventh click reads as broken | mine |
 | **No demo fixtures in the product.** The two header buttons are gone; `Open…` is the only way a document enters the app. They read as a capability list — two named documents answering "what can this open?" when the answer is `Limits.formats` — and they could not have survived distribution anyway: `repoRoot` resolved them through `#filePath`, a build-machine literal | yours |
 | **The reader can ask about the page they are on** — a conversation grounded on one page, not on the document. Sending all 45 pages on every question would make "this page's text is sent" a sentence the app cannot mean | yours |
 | **The model may fetch pages it was not shown, through one tool (`read_page`), bounded at `Limits.askHops`** — the answer to "where are the woody-brush rates" is on page 34 while the reader is on page 12, and a reader who already knew which page to turn to would not be asking. On the last hop the tool is withdrawn rather than the turn abandoned, so the bound costs latency, never the answer | yours |

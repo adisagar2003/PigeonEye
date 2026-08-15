@@ -120,7 +120,7 @@ private final class Recorder: @unchecked Sendable {
 @Test func recognised_values_on_the_page_travel_with_the_question() async throws {
     let transcript = document().pages[0].transcript
     let found = try #require(finding(
-        label: "EPA reg. no.", value: "524-529", quote: transcript, page: 1,
+        label: "EPA reg. no.", kind: .identifier, value: "524-529", quote: transcript, page: 1,
         region: Region(x: 0, y: 0, width: 1, height: 0.1),
         origin: .validator, validated: true, conf: 0.7,
         in: transcript))
@@ -465,7 +465,7 @@ private final class Recorder: @unchecked Sendable {
     let long = String(repeating: "quotation ", count: 400)   // ~4,000 chars
     let page = Page(transcript: long, lines: [], tables: 0, lists: 0, data: [:])
     let bulky = (0..<40).compactMap {
-        finding(label: "value \($0)", value: "v", quote: long, page: 1,
+        finding(label: "value \($0)", kind: .other, value: "v", quote: long, page: 1,
                 region: Region(x: 0, y: 0, width: 1, height: 0.1),
                 origin: .validator, validated: true, conf: 0.7, in: long)
     }

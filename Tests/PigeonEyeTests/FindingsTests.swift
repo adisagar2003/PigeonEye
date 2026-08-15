@@ -49,13 +49,13 @@ func epa_registration_numbers_validate_and_garbage_does_not(text: String, valid:
 
     #expect(
         finding(
-            label: "EPA reg. no.", value: "7969-242", quote: "7969-242",
+            label: "EPA reg. no.", kind: .identifier, value: "7969-242", quote: "7969-242",
             page: 1, region: Region(x: 0, y: 0, width: 1, height: 0.1),
             origin: .validator, validated: true, conf: 0.9, in: transcript) != nil)
 
     #expect(
         finding(
-            label: "EPA reg. no.", value: "9999-999", quote: "9999-999",
+            label: "EPA reg. no.", kind: .identifier, value: "9999-999", quote: "9999-999",
             page: 1, region: Region(x: 0, y: 0, width: 1, height: 0.1),
             origin: .validator, validated: true, conf: 0.9, in: transcript) == nil,
         "a quote absent from the transcript was accepted — I2 is not enforced")
@@ -146,7 +146,9 @@ func epa_registration_numbers_validate_and_garbage_does_not(text: String, valid:
 /// findings need two identities — otherwise selecting one highlights both and
 /// any consumer keyed on `id` conflates two source locations.
 @Test func the_same_value_in_two_places_gets_two_identities() async {
-    let text = "524-529"
+    // Carries the cue, because since 3.4 a bare `524-529` is a shape and not a
+    // claim — see `a_registration_number_is_claimed_only_where_the_line_says_so`.
+    let text = "EPA Reg. No. 524-529"
     func line(_ y: Double) -> Line {
         Line(text: text, conf: 0.9, bbox: [0.1, y, 0.3, 0.02], title: false, alts: [])
     }
@@ -172,4 +174,131 @@ func epa_registration_numbers_validate_and_garbage_does_not(text: String, valid:
     let page = try await ocr(image(at: Fixture.cleanPage))
     let found = await findings(on: page, number: 7)
     #expect(found.allSatisfy { $0.page == 7 })
+}
+
+// MARK: - 7 · Slice 3.4 — the shape is not the claim
+
+/// Helper: one line, one page, so a filter rule can be stated as a sentence.
+private func page(_ text: String, conf: Float = 0.9) -> Page {
+    Page(transcript: text,
+         lines: [Line(text: text, conf: conf, bbox: [0.1, 0.2, 0.8, 0.02], title: false, alts: [])],
+         tables: 0, lists: 0, data: [:])
+}
+
+/// **The 88% false positive this slice exists to kill.** `\b\d{3,5}-\d{1,5}\b`
+/// matched 78 distinct values across `assets/` and 9 were registration numbers.
+/// Every other one — phone numbers, IRS notice numbers, OMB numbers, ZIP+4 —
+/// rendered *checked*, because passing the shape is exactly what "checked"
+/// claimed. A shape this common is not a claim; the words beside it are.
+@Test(arguments: [
+    ("For emergencies call 1-800-424-9300 day or night.", false),
+    ("See Rev. Proc. 2021-48 for the election.", false),
+    ("OMB No. 1545-0074", false),
+    ("Washington, D.C. 20250-9410; (2) fax", false),
+    ("Supplemental: NVA 2008-04-088-0099", false),
+    ("EPA Reg. No. 524-529", true),
+    ("EPA Registration Number: 7969-242", true),
+    ("MASTER LABEL FOR EPA REG. NO. 524-529", true),
+    // EPA's own cover letters use a second wording for the same number, and one
+    // cue cost `524-529` four pages and a whole single-page scan before this
+    // case existed.
+    ("Admin Number: 524-529", true),
+    // And OCR read the E of EPA as a B on the 035915 scan, at confidence 0.668.
+    // `registration` + `number` is what survives that, and `epa` turns out never
+    // to have been the load-bearing half of the cue.
+    ("BPA Registration Number: 35915-4", true),
+])
+func a_registration_number_is_claimed_only_where_the_line_says_so(text: String, claimed: Bool) async {
+    let regs = await findings(on: page(text), number: 1)
+        .filter { $0.label == Format.epaRegistration.label }
+    #expect(!regs.isEmpty == claimed, "\(text.debugDescription) → \(regs.map { $0.value ?? "" })")
+}
+
+/// A phone number is still found — the cue declines to *label* a value, it never
+/// discards one. The detector that legitimately found it still reports it.
+@Test func the_phone_number_behind_a_rejected_registration_number_survives() async {
+    let found = await findings(on: page("For emergencies call 1-800-424-9300 day or night."), number: 1)
+    #expect(found.contains { $0.kind == .contact && $0.value?.contains("424-9300") == true },
+            "rejecting the reg-no claim also lost the phone number: \(found.map { $0.value ?? "" })")
+}
+
+/// An establishment number is not a registration number, and `2008-04-088-0099`
+/// contains four things shaped like one. Pinned as its own case because it is
+/// the misread that looks most like a real value on an EPA label.
+@Test func an_establishment_number_is_not_a_registration_number() async {
+    let found = await findings(on: page("Supplemental: NVA 2008-04-088-0099"), number: 1)
+    #expect(!found.contains { $0.origin == .validator && $0.value == "2008-04" },
+            "a fragment of a longer number was emitted as a value of its own")
+}
+
+/// **One value, one row.** `$1,000` is matched by the `amount` validator *and*
+/// by Apple's `moneyAmount` detector, at the same place on the same page — 693
+/// and 695 rows of the same 120 pages of IRS P17. Two rows for one value is not
+/// two facts, it is the same fact said twice, and the validator is the half that
+/// carries a verdict.
+@Test func one_value_in_one_place_is_one_row() async {
+    let found = await findings(on: page("You may deduct up to $1,000 of that expense."), number: 1)
+    let money = found.filter { $0.kind == .money }
+
+    #expect(money.count == 1, "one amount produced \(money.count) rows: \(money.map(\.label))")
+    #expect(money.first?.origin == .validator, "the merge kept the tier that cannot say no")
+    #expect(money.first?.validated == true)
+}
+
+/// Apple's date detector reads a rate range as a date: `1.6-2.4` and `0.07 -
+/// 0.10` off the EPA rate tables, `Saturday` off the tax guide. 80 of 114
+/// `calendarEvent` matches in this corpus carried no date in them at all, and
+/// they land in the one group a reader opens to find a deadline.
+@Test(arguments: [
+    ("Apply 1.6-2.4 per acre.", false),
+    ("Rate range 0.07 - 0.10 lb.", false),
+    ("or Saturday, whichever is later", false),
+    ("File by April 15, 2026 to avoid penalty.", true),
+    ("Stamped FEB 15 2011 on receipt.", true),
+    ("Expires 4/22/09 per the notice.", true),
+])
+func a_detected_date_with_no_date_in_it_is_not_a_date(text: String, kept: Bool) async {
+    let dates = await findings(on: page(text), number: 1).filter { $0.kind == .date }
+    #expect(!dates.isEmpty == kept, "\(text.debugDescription) → \(dates.map { $0.value ?? "" })")
+}
+
+/// The detector types reach the screen as their own names, and `calendarEvent`
+/// is not a word anybody reads a government document looking for.
+@Test func a_detector_finding_is_named_in_the_readers_words() async {
+    let found = await findings(on: page("Write to 26 Davis Drive, Research Triangle Park, NC 27709."), number: 1)
+    #expect(!found.contains { $0.label.contains(where: \.isUppercase) && $0.label.hasPrefix("postal") },
+            "a raw detector type reached the label: \(found.map(\.label))")
+    #expect(found.contains { $0.kind == .contact })
+}
+
+/// **The cue's recall side, which the precision measurement hid.** Two real
+/// single-page scans, each of which a one-wording cue emptied of its
+/// registration number — and a one-page document has no other page to recover
+/// from.
+///
+/// Asserted against the scans rather than against strings, because both failures
+/// were facts about the corpus (EPA writes `Admin Number:` on its cover letters;
+/// OCR reads `EPA` as `BPA` at 0.668) and no hand-built line would have found
+/// either.
+@Test(arguments: [
+    ("assets/scans/000524-00529-20241120-01.jpg", "524-529"),
+    ("assets/scans/035915-00004-20210302-01.jpg", "35915-4"),
+])
+func the_registration_number_survives_a_letter_that_words_it_differently(
+    scan: String, number: String
+) async throws {
+    let read = try await ocr(image(at: Fixture.root.appending(path: scan)))
+    let found = await findings(on: read, number: 1)
+
+    let identifiers = found.filter { $0.kind == .identifier }.map { $0.value ?? "" }
+    #expect(found.contains { $0.label == Format.epaRegistration.label && $0.value == number },
+            "the cue cost this document its registration number: \(identifiers)")
+}
+
+/// Every finding lands in a group, so a filter chip set cannot hide one.
+@Test func every_finding_on_a_real_page_carries_a_kind() async throws {
+    let read = try await ocr(image(at: Fixture.cleanPage))
+    let found = await findings(on: read, number: 1)
+    #expect(!found.isEmpty)
+    #expect(found.allSatisfy { Kind.allCases.contains($0.kind) })
 }

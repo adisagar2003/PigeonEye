@@ -106,6 +106,74 @@ the transcript. A caller cannot invent a quote because a caller cannot build a
 `Finding` any other way. A quote that is not in the transcript yields nil rather
 than throwing: one bad line must not cost the page its other findings.
 
+### 3.6 The shape is not the claim (slice 3.4)
+
+3.1 shipped one rule for finding a value: does it match the shape? Run over all
+of `assets/` that produced **8,421 findings**, and reading them is what this
+slice is. Three defects, all of the same kind — the shape was doing a job only
+context can do.
+
+**`\b\d{3,5}-\d{1,5}\b` matched 78 distinct values. Nine were registration
+numbers.** The rest were phone numbers (`1-800-424-9300`), IRS notice numbers
+(`2021-48`), OMB numbers (`1545-0074`), ZIP+4 (`20250-9410`) and EPA
+establishment numbers (`2008-04-088-0099`) — and every one of them rendered
+**checked**, because passing the shape is exactly what *checked* claimed. A
+federal tax guide with the word EPA nowhere in it produced 42 of them. Precision
+against a shape that common is not achievable by tightening the shape; it is
+carried by the words on the line, and every genuine occurrence in the corpus sits
+next to "EPA Reg. No." or "EPA Registration Number".
+
+So `Format.cues`: wordings the line must carry before a shape may be claimed
+under that name — any one group, all of its words. It declines to *label* a
+value, it never discards one; the phone number is still emitted by the detector
+that legitimately found it
+(`the_phone_number_behind_a_rejected_registration_number_survives`).
+
+**Precision is half the measurement, and the recall half is what made it three
+groups.** After the cue landed, the same dump was read the other way round: what
+did it *cost*? Two real single-page scans had been emptied of their registration
+number, and a one-page document has no other page to recover from.
+
+| The line | What broke | Group it needed |
+|---|---|---|
+| `Admin Number: 524-529` | EPA's **cover letters** word it differently from its labels. Cost `524-529` four of its eight pages and one document outright | `admin` + `number` |
+| `BPA Registration Number: 35915-4` | OCR read the E as a B, at conf 0.668. This was carried in §6.1 as a *risk*; it is a real line on a real scan | `registration` + `number` |
+
+Loosening cost nothing measurable: over the born-digital text of the whole corpus
+— 40,833 lines, the three IRS publications included — all three groups together
+claim **6 distinct values and 0 wrong ones**. The word doing the work is
+`registration`/`reg`; `epa` was never the load-bearing half, which only the
+recall pass could have shown.
+
+**One value in one place was two rows.** The `amount` validator found 693
+amounts on 120 pages of IRS P17; `moneyAmount` found 695 of the same ones. Two
+rows there are not two facts. Findings now merge on value + region, and the
+validator wins the collision because it is the half that can say no — keeping the
+detector's row would throw away the `validated` flag §12 ranks highest.
+
+**A date detector with no date in it.** Apple's `calendarEvent` read the EPA rate
+tables as dates: `1.6-2.4`, `0.07 - 0.10`, and bare `Saturday` off the tax guide.
+80 of 114 matches carried no date at all, and they land in the one group a reader
+opens to find a deadline. A month name or a numeric `d/m` separates them, and
+keeps every real date in the corpus — including `FEB 15 2011` off a rubber stamp.
+
+### 3.7 Two questions, two tabs (slice 3.4)
+
+The per-page list answers *what is on this page*. That is the F3 demo beat and it
+stays. It is also the wrong question for a long document: IRS P17 produces
+**2,064 findings over 120 pages**, and no amount of scrolling turns 17 rows a
+page into "when is this due".
+
+`Document.index` answers the other one — one row per distinct value, the pages it
+appears on, searchable, filtered by `Kind`. Clicking a row walks its occurrences
+and wraps, because a row that lists seven pages and goes dead on the seventh
+click reads as broken.
+
+`Kind` is a layer-0 type, not a string the view matches on: deciding that
+`moneyAmount` and `Amount` are the same question is domain knowledge, and a view
+that decided it would be layer 1's vocabulary leaking into layer 4
+(`coding-standards.md` §1).
+
 ---
 
 ## 4. TDD flow
@@ -146,6 +214,35 @@ than throwing: one bad line must not cost the page its other findings.
 | The same words twice on one page in two places | Two findings with two identities. One shared id highlights both rows and conflates two source locations. **Tested** — `the_same_value_in_two_places_gets_two_identities`. |
 
 ---
+
+## 6.1 Stress test (slice 3.4)
+
+| Case | Must happen |
+|---|---|
+| **`1-800-424-9300`** | Not a registration number, and still found as a phone number. **Tested** — `a_registration_number_is_claimed_only_where_the_line_says_so`, `the_phone_number_behind_a_rejected_registration_number_survives`. |
+| **A tax guide with no EPA in it** | Zero registration numbers. It found 42. |
+| **`$1,000` found by both producers** | One row, and it is the validator's. **Tested** — `one_value_in_one_place_is_one_row`. |
+| **`1.6-2.4` read as a calendar event** | Not filed under Dates. **Tested** — `a_detected_date_with_no_date_in_it_is_not_a_date`. |
+| **The cue line is itself misread** | **This happens.** `BPA Registration Number: 35915-4` — OCR read the E as a B on `035915-00004-20210302-01.jpg` at conf 0.668, and one wording emptied that scan of its registration number. Answered by a wording that does not depend on the misread token, and pinned by `the_registration_number_survives_a_letter_that_words_it_differently`. Written down because the row above it was a *prediction* until the recall pass ran, and a stress row nobody measured is a wish (the F1 lesson). |
+| **A residual recall cost remains** | A bare `524-529` in a page header, on a line with no wording at all, is not claimed. `524-529` is on 6 of its 8 original pages. The value is not lost — the index groups across the document, so the row is there with a shorter page list. The upgrade is document-level confirmation: a value that earns a wording *once* keeps the name everywhere in that document. Not built; it needs a pass over all pages, and the index already covers the reader's case. |
+| A value on seven pages | One row that lists them and walks them. **Tested** — `a_row_walks_its_occurrences_in_page_order_and_wraps`. |
+| The index against a real document | Loses no finding: occurrence counts sum to `findings.count`. **Tested** — `a_real_label_indexes_to_fewer_rows_than_it_has_findings`. |
+| A search matching nothing | Names the query and says so. Never a blank panel. |
+| A second document opened | Query and chip clear with the rest of the per-document state. |
+
+---
+
+## 7. Out of scope for 3.1
+
+The confidence composite and its ring (3.2), thresholds (3.3), the
+`assets/golden/kleister-charity/` 97-decoy count — that harness is the same
+`ocr_bench.py` corpus-globbing rewrite slice 2.2 needs and belongs with it.
+
+**Known ceiling, deliberate:** a finding's region is the whole line its quote
+came from, not the matched words. Vision returns per-line boxes; word boxes need
+a second request. F5 crops this region, so a tighter box is an upgrade, not a
+fix — carried as a `ponytail:` comment in `Tools/Findings.swift`.
+
 
 ---
 
@@ -208,16 +305,3 @@ The corpus maximum line confidence is **0.885** against a placeholder green cut
 of **0.85**, so green is nearly unreachable today. The ring under-claims, which
 is the right direction to be wrong — but it is effectively two-state until slice
 **3.3** measures the real cut points. Carried, not hidden.
-
----
-
-## 7. Out of scope for 3.1
-
-The confidence composite and its ring (3.2), thresholds (3.3), the
-`assets/golden/kleister-charity/` 97-decoy count — that harness is the same
-`ocr_bench.py` corpus-globbing rewrite slice 2.2 needs and belongs with it.
-
-**Known ceiling, deliberate:** a finding's region is the whole line its quote
-came from, not the matched words. Vision returns per-line boxes; word boxes need
-a second request. F5 crops this region, so a tighter box is an upgrade, not a
-fix — carried as a `ponytail:` comment in `Tools/Findings.swift`.

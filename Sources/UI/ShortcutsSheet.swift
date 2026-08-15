@@ -16,6 +16,7 @@ public struct ShortcutsSheet: View {
     public static let all: [Entry] = [
         .init(keys: "⌘O", what: "Open a file"),
         .init(keys: "⌘←  ⌘→", what: "Previous / next page"),
+        .init(keys: "⌘F", what: "Search everything it found"),
         .init(keys: "⌘−  ⌘+", what: "Zoom out / in"),
         .init(keys: "⇧⌘T", what: "Show or hide the text it read"),
         .init(keys: "⌘I", what: "Inspector — every step it took"),

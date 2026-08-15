@@ -818,14 +818,12 @@ public struct ReaderScreen: View {
     /// is decoration with a number painted on it. The quote is shown instead,
     /// because that is the claim this slice can actually stand behind (**I2**).
     private func findingsBlock(_ doc: Document) -> some View {
-        let onPage = doc.findings.filter { $0.page == model.page }
-
-        return VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("What it found")
                 .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
                 .foregroundStyle(Ink.accent700)
                 .padding(.bottom, 2)
-            Text("\(doc.findings.count) on this document · \(onPage.count) on page \(model.page)")
+            Text("\(doc.index.count) distinct values · \(doc.findings.count) occurrences over \(doc.pagesRead) pages")
                 .font(.body(12)).foregroundStyle(Ink.neutral600)
                 .padding(.bottom, 8)
 
@@ -835,6 +833,53 @@ public struct ReaderScreen: View {
             ConfidenceLegend()
                 .padding(.bottom, 10)
 
+            tabs
+                .padding(.bottom, 10)
+
+            switch model.findingsTab {
+            case .thisPage: pageFindings(doc)
+            case .everything:
+                IndexPanel(doc: doc, query: $model.query, kind: $model.kindFilter,
+                           selected: model.selectedIndexEntry) { model.select($0) }
+            }
+        }
+        .padding(18)
+    }
+
+    /// Two questions, two tabs. The per-page list is what the page in front of
+    /// you says; the index is where the *document* says something — and on a
+    /// 120-page tax guide only the second one is answerable, because the first
+    /// is 2,064 rows.
+    private var tabs: some View {
+        HStack(spacing: 0) {
+            tab(.thisPage, hint: "Only what is on the page you are on")
+            // ⌘F on the tab that holds the search box, because opening the index
+            // and reaching the field is one gesture, not two — the panel takes
+            // focus when it appears.
+            tab(.everything, hint: "Search everything it found (⌘F)")
+                .keyboardShortcut("f")
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func tab(_ which: ReaderModel.FindingsTab, hint: String) -> some View {
+        let on = model.findingsTab == which
+        return Button { model.findingsTab = which } label: {
+            Text(which.rawValue)
+                .font(.heading(12)).tracking(0.8).textCase(.uppercase)
+                .padding(.horizontal, 12).padding(.vertical, 5)
+                .foregroundStyle(on ? Ink.bg : Ink.neutral700)
+                .background(on ? Ink.accent : .clear)
+                .overlay(Rectangle().stroke(on ? Ink.accent : Ink.divider, lineWidth: 1))
+        }
+        .buttonStyle(.flat)
+        .help(hint)
+    }
+
+    private func pageFindings(_ doc: Document) -> some View {
+        let onPage = doc.findings.filter { $0.page == model.page }
+
+        return Group {
             if onPage.isEmpty {
                 // The completeness rule: a page with nothing on it says so.
                 // A blank panel reads as a failure to run (`project-overview.md` §9).
@@ -876,7 +921,6 @@ public struct ReaderScreen: View {
                 .blueprint(stroke: Ink.divider)
             }
         }
-        .padding(18)
     }
 
     private func transcriptBlock(_ doc: Document) -> some View {
@@ -1010,18 +1054,66 @@ public struct ReaderScreen: View {
         .overlay(Rectangle().fill(Ink.divider).frame(height: 1), alignment: .bottom)
     }
 
+    // MARK: - Export
+
+    /// The app's only write (F8). A menu rather than four buttons: the choice is
+    /// one decision with four answers, and four buttons along a 452pt rail would
+    /// read as four different features.
     private var footer: some View {
-        HStack(spacing: 12) {
-            Text("Export findings")
-                .font(.heading(13)).tracking(0.9).textCase(.uppercase)
-                .padding(.horizontal, 12).padding(.vertical, 6)
-                .overlay(Rectangle().stroke(Ink.divider, lineWidth: 1))
-                .foregroundStyle(Ink.neutral500)
+        let ready = model.doc != nil
+
+        return HStack(spacing: 12) {
+            Menu {
+                ForEach(ExportFormat.allCases) { format in
+                    Button(format.label) { save(format) }
+                }
+            } label: {
+                Text("Export findings")
+                    .font(.heading(13)).tracking(0.9).textCase(.uppercase)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .overlay(Rectangle().stroke(ready ? Ink.accent600 : Ink.divider, lineWidth: 1))
+                    .foregroundStyle(ready ? Ink.accent700 : Ink.neutral500)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(!ready)
+            .help(ready ? "Write the findings to a file you choose"
+                        : "Open a document first")
+
             Text("Findings only — never document bytes.")
                 .font(.body(11)).foregroundStyle(Ink.neutral600)
         }
         .padding(.horizontal, 18).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .overlay(Rectangle().fill(Ink.divider).frame(height: 1), alignment: .top)
+    }
+
+    /// Write the export where the user says, and nowhere else.
+    ///
+    /// `NSSavePanel` rather than a default location, because "no default
+    /// location is written to" is the slice's first acceptance criterion — the
+    /// app has no path of its own to write to and must not acquire one.
+    private func save(_ format: ExportFormat) {
+        guard let doc = model.doc else { return }
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = UTType(filenameExtension: format.ext).map { [$0] } ?? []
+        panel.nameFieldStringValue = doc.exportName(format)
+        panel.canCreateDirectories = true
+        panel.message = "Findings and fields only. The document itself is not written."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            // `.atomic` is the half of "nothing half-written" that is easy to
+            // miss: a plain write leaves a truncated file behind when the disk
+            // fills, and a truncated findings file looks like a complete one.
+            try doc.exported(as: format).write(to: url, options: .atomic)
+            model.flash("Saved \(url.lastPathComponent)")
+        } catch {
+            // Named, not swallowed. The path is not in the message — the file
+            // name the user just typed is.
+            model.flash("Not saved: \(error.localizedDescription)")
+        }
     }
 }
