@@ -1,4 +1,5 @@
 import Agent
+import AppKit
 import Contracts
 import SwiftUI
 import UniformTypeIdentifiers
@@ -12,6 +13,8 @@ import UniformTypeIdentifiers
 public struct ReaderScreen: View {
     @State private var model = ReaderModel()
     @State private var picking = false
+    @State private var shortcutsOpen = false
+    @State private var keyWatch: Any?
 
     /// ponytail: `UserDefaults` under the process name, because a SwiftPM
     /// executable has no bundle. This is now the *only* place that ceiling is
@@ -50,6 +53,27 @@ public struct ReaderScreen: View {
             if case let .success(url) = result {
                 Task { await model.open(url) }
             }
+        }
+        .sheet(isPresented: $shortcutsOpen) {
+            ShortcutsSheet { shortcutsOpen = false }
+        }
+        // A bare `?` has no modifier to hang a `.keyboardShortcut` on, and the
+        // one key it *would* name (Shift-/) is a US-layout fact rather than a
+        // property of the key. A local monitor sees the character the layout
+        // actually produced, and does not depend on which control holds focus.
+        .onAppear {
+            guard keyWatch == nil else { return }
+            keyWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard ShortcutsSheet.opensList(characters: event.characters,
+                                               modifiers: event.modifierFlags)
+                else { return event }
+                shortcutsOpen = true
+                return nil
+            }
+        }
+        .onDisappear {
+            if let keyWatch { NSEvent.removeMonitor(keyWatch) }
+            keyWatch = nil
         }
     }
 
@@ -90,6 +114,21 @@ public struct ReaderScreen: View {
             .buttonStyle(.flat)
             .keyboardShortcut("i")
             .help("Inspector (⌘I)")
+
+            // ⌘? as well as the bare `?` the monitor catches: ⌘? is where macOS
+            // keeps help, and it is the one a user tries before pressing keys
+            // at random.
+            Button { shortcutsOpen = true } label: {
+                Text("?")
+                    .font(.heading(12.5)).tracking(0.9)
+                    .frame(minWidth: 14).padding(.horizontal, 6).padding(.vertical, 5)
+                    .foregroundStyle(Ink.accent200)
+                    .overlay(Rectangle().stroke(Ink.accent600, lineWidth: 1))
+            }
+            .buttonStyle(.flat)
+            .keyboardShortcut("/", modifiers: [.command, .shift])
+            .help("Keyboard shortcuts (?)")
+            .accessibilityLabel("Keyboard shortcuts")
         }
         .padding(.horizontal, 18).padding(.vertical, 10)
         .background(Ink.accent900)
