@@ -1,6 +1,7 @@
 import Agent
 import AppKit
 import Contracts
+import Gate
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -15,6 +16,10 @@ public struct ReaderScreen: View {
     @State private var picking = false
     @State private var shortcutsOpen = false
     @State private var keyWatch: Any?
+    @State private var question = ""
+    /// Whether the ask field holds focus. Read by the bare-`?` monitor, which
+    /// sees every keystroke in the app and would otherwise eat the character.
+    @FocusState private var asking: Bool
 
     /// ponytail: `UserDefaults` under the process name, because a SwiftPM
     /// executable has no bundle. This is now the *only* place that ceiling is
@@ -24,6 +29,12 @@ public struct ReaderScreen: View {
     /// this ships as a signed .app the key moves to the bundle's domain, and
     /// existing installs see the explainer once more.
     @AppStorage("onboardingSeen") private var onboardingSeen = false
+
+    /// The tier chosen at first run, and the same store `OnboardingScreen`
+    /// writes. Read here because this is where it has to take effect: a reader
+    /// who answered "on this Mac" and is then handed a cloud ask panel was not
+    /// actually asked anything.
+    @AppStorage("readingTier") private var tier = OnboardingScreen.Tier.preferred
 
     public init() {}
 
@@ -61,11 +72,28 @@ public struct ReaderScreen: View {
         // one key it *would* name (Shift-/) is a US-layout fact rather than a
         // property of the key. A local monitor sees the character the layout
         // actually produced, and does not depend on which control holds focus.
+        // The tier is a stored preference, and a preference nothing reads is a
+        // setting that lies. Applied on appear and again whenever it changes,
+        // so "On this Mac" actually turns the ask panel off rather than merely
+        // being remembered.
+        .onAppear { model.honour(tier) }
+        .onChange(of: tier) { _, picked in model.honour(picked) }
         .onAppear {
             guard keyWatch == nil else { return }
             keyWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // ⌘K puts the caret in the ask field. Handled here rather than
+                // as a `.keyboardShortcut` because the only control that could
+                // carry one is the field itself, and a field cannot shortcut its
+                // own focus.
+                if event.modifierFlags.intersection([.command, .control, .option, .shift]) == [.command],
+                   event.charactersIgnoringModifiers == "k",
+                   model.doc != nil, model.canAsk {
+                    asking = true
+                    return nil
+                }
                 guard ShortcutsSheet.opensList(characters: event.characters,
-                                               modifiers: event.modifierFlags)
+                                               modifiers: event.modifierFlags,
+                                               typing: asking)
                 else { return event }
                 shortcutsOpen = true
                 return nil
@@ -85,8 +113,15 @@ public struct ReaderScreen: View {
                 Text("PigeonEye")
                     .font(.heading(20)).tracking(3.2).textCase(.uppercase)
                     .foregroundStyle(Ink.bg)
-                // True in F1 by construction: there is no Gate layer to call.
-                Text("Reads locally")
+                // Was "Reads locally" full stop, and that was true while no Gate
+                // layer existed to call. Reading is still entirely local — the
+                // rasterise/OCR/findings path touches no network — but asking is
+                // not, so the chip says which half is which. A claim that is
+                // true of one path and quietly false of another is the "fallback
+                // you have to discover" `project-overview.md` §3.1 rules out.
+                Text(model.askGranted && !model.localReady
+                     ? "Reads locally · asked \(model.cloud?.host ?? "")"
+                     : "Reads locally")
                     .font(.heading(12, .semibold)).tracking(1.1).textCase(.uppercase)
                     .foregroundStyle(Ink.accent300)
             }
@@ -398,6 +433,7 @@ public struct ReaderScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let doc = model.doc {
+                    askBlock
                     if doc.isForm { fieldsBlock(doc) }
                     findingsBlock(doc)
                     transcriptBlock(doc)
@@ -413,6 +449,163 @@ public struct ReaderScreen: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Ink.bg)
+    }
+
+    // MARK: - Ask
+
+    /// A conversation about the page on screen.
+    ///
+    /// Sits above the findings because it is about the page the reader is
+    /// looking at, and everything below it is about the document as a whole.
+    ///
+    /// The subtitle is not decoration. This is the only block in the app that
+    /// sends anything, and it says so before the field, every time — not in a
+    /// tooltip, not in settings (`project-overview.md` §3.1).
+    private var askBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Ask about page \(model.page)")
+                .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
+                .foregroundStyle(Ink.accent700)
+                .padding(.bottom, 2)
+
+            if model.canAsk {
+                // Which tier is answering, before a word of its output. On the
+                // local tier this is the product's headline claim being true on
+                // screen rather than in a README.
+                Text(model.localReady
+                     ? "answered on this Mac — nothing leaves, and there is nothing to agree to"
+                     : "answers come from \(model.cloud?.host ?? "") — this page's text is sent, nothing else")
+                    .font(.body(11.5))
+                    .foregroundStyle(model.localReady ? Ink.accent700 : Ink.neutral600)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 10)
+
+                if !model.turns.isEmpty {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 10) {
+                            ForEach(Array(model.turns.enumerated()), id: \.offset) { _, turn in
+                                bubble(turn)
+                            }
+                        }
+                        .padding(10)
+                    }
+                    .frame(maxHeight: 320)
+                    .blueprint(stroke: Ink.divider)
+                    .padding(.bottom, 10)
+                }
+
+                if let held = model.askPending, let cloud = model.cloud {
+                    consent(cloud, question: held)
+                } else {
+                    askField
+                }
+            } else {
+                // A box that cannot answer is worse than no box. Say what is
+                // missing rather than failing on the first press — and say
+                // which reason it is, because one is a key the reader can set,
+                // one is a switch in System Settings, and one is the machine.
+                Text(model.localBlocker
+                     ?? "No key is set, so nothing can be asked. Export OPENAI_KEY and reopen.")
+                    .font(.body(11.5)).foregroundStyle(Ink.neutral600)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(18)
+        .overlay(Rectangle().fill(Ink.divider).frame(height: 1), alignment: .bottom)
+    }
+
+    private var askField: some View {
+        HStack(spacing: 8) {
+            TextField("what does this page mean?", text: $question)
+                .textFieldStyle(.plain)
+                .font(.body(12.5))
+                .focused($asking)
+                .disabled(model.answering)
+                .onSubmit { submit() }
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .blueprint(stroke: Ink.divider)
+
+            Button(action: submit) {
+                Text(model.answering ? "…" : "Ask")
+                    .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
+                    .frame(minWidth: 30)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(Ink.accent).foregroundStyle(Ink.bg)
+            }
+            .buttonStyle(.flat)
+            .disabled(model.answering || question.trimmingCharacters(in: .whitespaces).isEmpty)
+        }
+    }
+
+    /// Taken once per document, before the first question — and taken *here*,
+    /// where the reader can see exactly what it covers. `project-overview.md`
+    /// §4.1: the grant is for the document, not for each message, because a
+    /// second prompt after the first send protects nothing and reads as
+    /// assurance about everything else.
+    private func consent(_ cloud: Gate.Config, question held: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Send this page to \(cloud.host)?")
+                .font(.body(12.5, .semibold))
+            Text("""
+                The text of the page you are on goes to \(cloud.host), and so does any other page \
+                it needs to answer. The file itself, its name and every page image stay here. \
+                Asked once for this document.
+                """)
+                .font(.body(11.5)).foregroundStyle(Ink.neutral700)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                Button { model.cancelPending() } label: {
+                    Text("Not now")
+                        .font(.heading(12)).tracking(0.9).textCase(.uppercase)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .overlay(Rectangle().stroke(Ink.divider, lineWidth: 1))
+                        .foregroundStyle(Ink.neutral700)
+                }
+                .buttonStyle(.flat)
+
+                Button {
+                    model.grantAsk()
+                    Task { await model.sendPending() }
+                } label: {
+                    Text("Send it")
+                        .font(.heading(12)).tracking(0.9).textCase(.uppercase)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(Ink.accent).foregroundStyle(Ink.bg)
+                }
+                .buttonStyle(.flat)
+            }
+        }
+        .padding(12)
+        .blueprint(stroke: Ink.accent400)
+        .help(held)
+    }
+
+    private func bubble(_ turn: Turn) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(turn.role == .user ? "You" : "Answer")
+                .font(.mono(9.5)).tracking(0.5).textCase(.uppercase)
+                .foregroundStyle(turn.role == .user ? Ink.neutral600 : Ink.accent700)
+            Text(turn.text)
+                .font(.body(12.5))
+                .foregroundStyle(Ink.text)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            // Which pages the answer rests on, so a claim can be checked against
+            // the page rather than taken on trust.
+            if turn.pages.count > 1 || (turn.pages.first.map { $0 != model.page } ?? false) {
+                Text("from " + turn.pages.map { "page \($0)" }.joined(separator: ", "))
+                    .font(.mono(10)).foregroundStyle(Ink.neutral600)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func submit() {
+        let asked = question
+        question = ""
+        Task { await model.ask(asked) }
     }
 
     /// The fields the user must fill, read straight out of the file.
@@ -604,11 +797,24 @@ public struct ReaderScreen: View {
 
             Rectangle().fill(Ink.divider).frame(height: 1)
 
-            // True by construction in F1: no Gate layer exists to send anything.
-            HStack(spacing: 4) {
+            // Was unconditionally "nothing", which was true while no Gate layer
+            // existed. Now it is a ledger. Page numbers, sizes and the host —
+            // never the words, never the filename, never the key
+            // (`coding-standards.md` §5.2). Inspector mode is a view, not an
+            // exemption from the logging rule.
+            VStack(alignment: .leading, spacing: 3) {
                 Text("Left this machine:").font(.body(11.5)).foregroundStyle(Ink.neutral700)
-                Text("nothing. Everything above was read here.")
-                    .font(.body(11.5)).foregroundStyle(Ink.accent700)
+                if model.sends.isEmpty {
+                    Text("nothing. Everything above was read here.")
+                        .font(.body(11.5)).foregroundStyle(Ink.accent700)
+                } else {
+                    ForEach(Array(model.sends.enumerated()), id: \.offset) { _, line in
+                        Text(line).font(.mono(10.5)).foregroundStyle(Ink.accent700)
+                    }
+                    Text("Reading was local. Only the pages listed above were sent, and only as text.")
+                        .font(.body(10.5)).foregroundStyle(Ink.neutral600)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(.horizontal, 18).padding(.vertical, 15)

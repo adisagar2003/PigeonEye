@@ -2,6 +2,7 @@ import Agent
 import Contracts
 import CoreGraphics
 import Foundation
+import Gate
 import Observation
 
 /// Everything the reader screen knows. Layer 4 — it holds no reading logic of
@@ -52,12 +53,74 @@ public final class ReaderModel {
     /// call it late. Production always gets `Agent.read`.
     private let read: @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
 
+    /// `nil` when asking cannot happen — no key in the environment, or the
+    /// reader picked a tier that does not send. The panel then offers no box to
+    /// type in: a field that cannot send is worse than no field.
+    ///
+    /// Injectable for the same reason `read` is: a test that asserts nothing
+    /// leaves the machine has to be able to watch the thing that would send it.
+    public private(set) var cloud: Gate.Config?
+    /// What the environment offers, before the tier has an opinion about it.
+    private let configured: Gate.Config?
+    private let transport: Gate.Transport
+    private let respond: LocalModel.Respond
+
+    /// The tier the reader picked at first run, and what it means here.
+    public private(set) var tier: OnboardingScreen.Tier = .openAI
+    /// Whether the on-device model can actually answer on this machine.
+    /// Re-asked on every `honour`, because macOS downloads and evicts these
+    /// assets on its own schedule.
+    public private(set) var localReady = false
+    /// Why the on-device tier cannot run, when it cannot. Rendered in the
+    /// panel, because "asking is off" without a reason is not a disclosure.
+    public private(set) var localBlocker: String?
+
     public init(
         read: @escaping @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
-            = Agent.read
+            = Agent.read,
+        cloud: Gate.Config? = Gate.Config.fromEnvironment(ProcessInfo.processInfo.environment),
+        transport: @escaping Gate.Transport = Gate.defaultTransport,
+        respond: @escaping LocalModel.Respond = LocalModel.session
     ) {
         self.read = read
+        self.configured = cloud
+        self.cloud = cloud
+        self.transport = transport
+        self.respond = respond
     }
+
+    /// Honour the tier the reader picked at first run.
+    ///
+    /// **This is what makes "On this Mac" mean anything.** Without it the tier
+    /// was a stored preference that only the onboarding screen ever read, so
+    /// choosing the local option still produced a cloud-backed ask panel — the
+    /// exact "fallback you have to discover" `project-overview.md` §3.1 rules
+    /// out, and worse, because the reader had explicitly declined it.
+    public func honour(_ tier: OnboardingScreen.Tier, localReady: Bool? = nil) {
+        self.tier = tier
+        cloud = Self.askConfig(tier: tier, offered: configured)
+        self.localReady = localReady ?? (tier == .local && localModelAvailable())
+        localBlocker = tier == .local && !self.localReady
+            ? (localModelBlocker() ?? "The on-device model is not available on this Mac.")
+            : nil
+    }
+
+    /// Pure, so the rule is testable without a window. `.local` never resolves
+    /// to a cloud endpoint — it answers on this machine or it says why it
+    /// cannot.
+    nonisolated public static func askConfig(tier: OnboardingScreen.Tier,
+                                             offered: Gate.Config?) -> Gate.Config? {
+        tier == .openAI ? offered : nil
+    }
+
+    /// Whether the panel has anything to offer, by either tier.
+    public var canAsk: Bool { cloud != nil || localReady }
+
+    /// **Nothing leaves the machine on the local tier**, so there is nothing to
+    /// consent to. Asking permission to do something that does not happen is
+    /// the same theatre `project-overview.md` §4.1 rules out for crops — it
+    /// reads as evidence that something *is* being sent.
+    public var needsGrant: Bool { !localReady && cloud != nil && !askGranted }
 
     /// Identifies the newest request. Every `await` in this file is a point where
     /// an older, slower read can come back and clobber a newer one — a 45-page
@@ -78,6 +141,99 @@ public final class ReaderModel {
     /// — and this app does not get to be silent about what it is doing.
     public private(set) var notice: String?
     private var noticeID = UUID()
+
+    // MARK: - Asking about the page
+
+    /// The conversation about this document. Memory only, dropped the moment
+    /// another document is opened (**I9**) — there is no persistence path in
+    /// this app and this feature does not add one.
+    public private(set) var turns: [Turn] = []
+
+    /// True while a question is in flight. The box stays visible and disabled
+    /// rather than disappearing: a control that vanishes mid-action reads as a
+    /// crash.
+    public private(set) var answering = false
+
+    /// Whether the reader has agreed that this document's pages may be sent.
+    /// Taken once per document, in the panel, before the first question
+    /// (`project-overview.md` §4.1 — consent at document scope, not per message,
+    /// because a second prompt after the first send protects nothing).
+    public private(set) var askGranted = false
+
+    /// A question typed before the grant was given. Held rather than dropped, so
+    /// agreeing sends the question the reader already wrote instead of making
+    /// them type it again.
+    public private(set) var askPending: String?
+
+    /// What left the machine, for the inspector: page number, size, host. Never
+    /// the words (`coding-standards.md` §5.2).
+    public private(set) var sends: [String] = []
+
+    /// Ask about the page currently on screen.
+    ///
+    /// Before the grant this only *holds* the question — the transport is not
+    /// reached, which is what makes **I1** true here by construction rather than
+    /// by a check somewhere downstream.
+    public func ask(_ question: String) async {
+        let asked = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !asked.isEmpty, doc != nil, canAsk, !answering else { return }
+        // The grant covers egress, so the local tier does not need one — see
+        // `needsGrant`.
+        guard !needsGrant else {
+            askPending = asked
+            return
+        }
+        await send(asked)
+    }
+
+    /// Agree that this document's pages may be sent. Does not itself send.
+    public func grantAsk() { askGranted = true }
+
+    /// Send whatever was typed before the grant. Separate from `grantAsk` so the
+    /// consent card can be dismissed without a request going out behind it.
+    public func sendPending() async {
+        guard askGranted, let held = askPending else { return }
+        askPending = nil
+        await send(held)
+    }
+
+    /// Throw away a question rather than sending it. The reader said no.
+    public func cancelPending() { askPending = nil }
+
+    private func send(_ question: String) async {
+        guard let doc else { return }
+        let id = requestID
+        let asked = page
+
+        turns.append(Turn(role: .user, text: question))
+        answering = true
+
+        // The on-device tier wins when it is available. That ordering is the
+        // product: `project-overview.md` §3 promises that on a machine with a
+        // local reasoning model nothing leaves at all, and a preference the
+        // code consults second is a preference the code does not hold.
+        let answer: Answer
+        if localReady {
+            answer = await answeredHere(doc, page: asked, question: question, respond: respond)
+        } else if let cloud {
+            answer = await answered(doc, page: asked, question: question,
+                                    history: turns.dropLast(), config: cloud,
+                                    transport: transport)
+        } else {
+            answering = false
+            return
+        }
+
+        // The same generation check as every other await in this file: an answer
+        // about the document that *was* open must not land on the one that is.
+        guard requestID == id, self.doc?.url == doc.url else { return }
+
+        turns.append(Turn(role: .assistant,
+                          text: answer.note.map { "\(answer.text)\n\n\($0)" } ?? answer.text,
+                          pages: answer.pagesUsed))
+        sends.append(contentsOf: answer.sends)
+        answering = false
+    }
 
     public func open(_ url: URL) async {
         // Already read, or already reading. A second pass costs ~15s and cannot
@@ -100,6 +256,14 @@ public final class ReaderModel {
         zoom = 1
         selectedField = nil
         selectedFinding = nil
+        // The conversation, the grant and the record of what left all belong to
+        // the document that is going away (**I9**). A grant that outlives its
+        // document is a grant for a document the reader never agreed to send.
+        turns = []
+        askGranted = false
+        askPending = nil
+        answering = false
+        sends = []
 
         do {
             let document = try await read(url) { [weak self] done, total in

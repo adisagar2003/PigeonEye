@@ -308,10 +308,132 @@ public enum Limits {
 
     public static let formats: Set<String> = ["pdf", "png", "jpg", "jpeg"]
 
+    /// The ceiling asserted before every model call (**I13**). The limit fails
+    /// *silently* when crossed, which is why the estimate happens before the
+    /// request goes out rather than after it comes back wrong.
+    ///
+    /// ponytail: a character-count estimate, not a tokeniser. It over-counts on
+    /// ordinary English, which errs toward sending less than allowed — the safe
+    /// direction. A real tokeniser is the upgrade if a page is ever cut that did
+    /// not need to be.
+    public static let maxPromptTokens = 12_000
+
+    /// How many times the model may ask for another page before it must answer
+    /// with what it has (**I10**).
+    ///
+    /// Four, because the loop exists for one job — "the rates are not on this
+    /// page, they are on the rate table" — and a model that needs a fifth page
+    /// to answer a question about the page in front of the reader is not
+    /// answering that question any more. On the last pass the tool is withdrawn
+    /// rather than the turn abandoned, so the bound costs latency, never the
+    /// answer.
+    public static let askHops = 4
+
+    /// How much of one page's text goes into an ask. The largest page in
+    /// `assets/` is well under this; the cap exists so a pathological page
+    /// cannot be what pushes a request over `maxPromptTokens`.
+    public static let askPageChars = 6_000
+
+    /// **How many pages may leave the machine to answer one question**, however
+    /// many the model asks for.
+    ///
+    /// `askHops` bounds *rounds*, not pages — one reply may legally carry a
+    /// hundred `read_page` calls, and processing them all would send an entire
+    /// document inside a "bounded" loop. This is the bound that actually holds
+    /// the privacy and billing promise, because it counts the thing that leaves.
+    public static let askPages = 6
+
+    /// The longest quote carried as evidence with a question, and the longest
+    /// question accepted. Both are unbounded at their source — a quote is a
+    /// verbatim OCR line and a question is whatever was pasted into the field —
+    /// so both are capped before they can be what puts a request over budget.
+    public static let askQuoteChars = 300
+    public static let askQuestionChars = 2_000
+
+    /// The budget for a question put to the **on-device** model.
+    ///
+    /// Apple's window is 4096 tokens for prompt *and* answer, fixed and not
+    /// configurable (`architecture.md` §3). This spends a little over half of
+    /// it on the question so there is room left for a reply — a prompt that
+    /// fills the window produces a truncated answer, which reads as the model
+    /// trailing off rather than as the limit it is.
+    ///
+    /// One EPA page measures ~530 tokens, so a page, its evidence and a
+    /// question fit comfortably. That is the measurement that makes an
+    /// on-device tier possible for this feature and not for whole-document
+    /// explanation.
+    public static let localPromptTokens = 2_400
+
+    /// How many earlier turns travel with a question. Enough to follow up
+    /// ("and the one below it?"), bounded so a long conversation cannot grow
+    /// the payload without limit.
+    public static let askHistory = 8
+
     /// How many pages get read, and whether that is fewer than the document has.
     /// Pure, so it is testable without a 200-page fixture.
     public static func pagesToRead(total: Int) -> (count: Int, capped: Bool) {
         total > maxPages ? (maxPages, true) : (total, false)
+    }
+}
+
+/// One turn of a conversation about an open document.
+///
+/// Layer 0 because three layers hold it: the view renders it, the egress
+/// serialises it, and the loop between them appends to it. A second shape for
+/// "a message" in any of the three is the parallel-dictionary failure
+/// `coding-standards.md` §1.1 exists to prevent.
+public struct Turn: Sendable, Equatable {
+    public enum Role: String, Sendable { case user, assistant, tool }
+
+    public let role: Role
+    /// What the reader sees. For an `.assistant` turn that only asked for a
+    /// page, this is empty and `calls` carries the request.
+    public let text: String
+    /// Which `Call` this turn answers. Set on `.tool` turns only — the API
+    /// pairs a result to its request by id, not by position.
+    public let callID: String?
+    /// Set on `.assistant` turns that asked to read a page.
+    public let calls: [Call]
+    /// The pages this turn's answer rests on, 1-based and in the order they
+    /// were used. Rendered under the answer so a claim can be checked against
+    /// the page it came from.
+    public let pages: [Int]
+
+    public init(role: Role, text: String, callID: String? = nil,
+                calls: [Call] = [], pages: [Int] = []) {
+        self.role = role; self.text = text
+        self.callID = callID; self.calls = calls; self.pages = pages
+    }
+}
+
+/// The model asking for something it was not given.
+public struct Call: Sendable, Equatable {
+    public let id: String
+    public let name: String
+    /// The raw JSON string the API returns. Left as text on purpose: it is
+    /// parsed at the one place that knows what the arguments mean, rather than
+    /// decoded into a shape layer 0 would then have to keep in step with the
+    /// tool list.
+    public let arguments: String
+
+    public init(id: String, name: String, arguments: String) {
+        self.id = id; self.name = name; self.arguments = arguments
+    }
+
+    /// The one tool this app offers.
+    public static let readPage = "read_page"
+
+    /// The page number in `arguments`, or nil if it is not a page request we
+    /// understand. A malformed argument is a question the model asked badly,
+    /// not a crash.
+    public var requestedPage: Int? {
+        guard name == Self.readPage,
+              let data = arguments.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        if let number = object["page"] as? Int { return number }
+        if let text = object["page"] as? String { return Int(text) }
+        return nil
     }
 }
 

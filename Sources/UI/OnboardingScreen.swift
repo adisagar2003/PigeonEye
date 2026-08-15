@@ -3,10 +3,14 @@ import AppKit
 import SwiftUI
 
 // The first-run explainer. Four cards, stepped through by hand, then never
-// shown again. Every claim here is one F1 actually keeps — there is no Gate
-// layer in the package, so "nothing leaves this machine" is true by
-// construction rather than by promise (context/features/01-read-it-locally.md
-// §3). When a later feature adds egress, the card that says so changes with it.
+// shown again. Every claim here has to be one the build actually keeps.
+//
+// It once said "there is no Gate layer in the package", which was true by
+// construction until F9 built one. **A first-run screen is the worst place in
+// an app to carry a stale promise**: it is read once, by someone deciding
+// whether to trust the thing, and never revisited. So the cards now describe
+// two tiers that both exist — reading is local either way, and asking is local
+// too when the reader picks it (context/features/09-ask-about-this-page.md).
 
 public struct OnboardingScreen: View {
     struct Card {
@@ -18,15 +22,16 @@ public struct OnboardingScreen: View {
         var picksTier = false
     }
 
-    /// Which tier does the reasoning — `architecture.md` §6, Boundary C, and the
-    /// row in §5 that already decided "cloud for the demo, local where hardware
-    /// allows". Recorded at first run and read when F5 ships the egress
-    /// function; **today it sends nothing either way**, because there is no Gate
-    /// layer in the package — `scripts/layers.sh` still reports "no egress
-    /// outside Gate", and this file is not allowed to be the exception.
+    /// Which tier does the reasoning — `architecture.md` §6, and the row in §5
+    /// that decided "cloud for the demo, local where hardware allows".
     ///
-    /// ponytail: lives in UI because UI is the only layer that has an opinion
-    /// about it. It moves down to `Contracts` the moment the Gate reads it.
+    /// **This is now load-bearing rather than recorded.** `ReaderModel.honour`
+    /// reads it, and it decides whether a question is answered on this Mac or
+    /// sent to an endpoint. A preference nothing consults is a setting that
+    /// lies, and this one used to be exactly that.
+    ///
+    /// ponytail: lives in UI because UI is where it is picked. It moves down to
+    /// `Contracts` if a lower layer ever needs to branch on it.
     public enum Tier: String, CaseIterable, Identifiable, Sendable {
         case openAI
         case local
@@ -46,10 +51,11 @@ public struct OnboardingScreen: View {
         public var detail: String {
             switch self {
             case .openAI:
-                "Crops and transcript text leave the machine, and only inside the "
-                    + "consent you give when you import a document."
+                "The text of a page you ask about leaves the machine, and only "
+                    + "after you agree to it for that document."
             case .local:
-                "Apple's on-device model. Nothing leaves, and there is no key to supply."
+                "Apple's on-device model answers your questions here. Nothing "
+                    + "leaves, and there is no key to supply."
             }
         }
     }
@@ -73,11 +79,13 @@ public struct OnboardingScreen: View {
                       copy.
                       """),
         .init(kicker: "Where it runs",
-              title: "On this machine, and only this machine",
+              title: "Reading happens here, and only here",
               detail: """
-                      Rendering and reading both happen here. This build has no \
-                      network code in it at all, and the inspector shows every \
-                      step it took and what left the machine: nothing.
+                      Rendering and reading both happen on this machine — no \
+                      page image and no file ever leaves it. The one thing that \
+                      can leave is the text of a page you ask a question about, \
+                      and only after you say so. The inspector lists every page \
+                      that left, or says nothing did.
                       """),
         .init(kicker: "What you get",
               title: "Every page, or an honest gap",
@@ -88,13 +96,13 @@ public struct OnboardingScreen: View {
                       skipped.
                       """),
         .init(kicker: "Which model",
-              title: "OpenAI reads it, unless you say otherwise",
+              title: "OpenAI answers questions, unless you say otherwise",
               detail: """
-                      When a page is too unclear to settle here, the question \
-                      goes to OpenAI — crops and transcript text, only under the \
-                      consent you give at import. Pick On this Mac and nothing \
-                      leaves at all. Either way this build sends nothing yet: \
-                      the card before this one is still true.
+                      Ask about a page and its text goes to OpenAI, once you \
+                      agree to it for that document. Pick On this Mac and \
+                      Apple's on-device model answers instead — nothing leaves, \
+                      and there is nothing to agree to. Reading is local either \
+                      way.
                       """,
               picksTier: true),
     ]

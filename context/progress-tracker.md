@@ -14,6 +14,52 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
+**F9 slice 9.1 is `complete`, and it was taken out of order — on request.** The
+reader can ask a question about the page in front of them and get an answer
+grounded on that page, with the model able to fetch other pages it was not
+shown. It is a new feature, not a slice of an existing one: `issues.md` had no
+chat anywhere, and the only "ask" in it was F5's crop consent.
+
+**Three things this row changed that no later row gets to change back:**
+
+1. **Layer 3 exists.** `Sources/Gate/Gate.swift` is the first and only file in
+   the package that holds a socket. Until it landed, the no-network claim was
+   the absence of an API — checkable with one grep. It now rests on that file
+   being short enough to read in full, and on `scripts/layers.sh` keeping
+   `URLSession` out of everywhere else.
+2. **Two claims in the UI stopped being true and were changed in the same
+   diff.** The header said "Reads locally" unconditionally and the inspector
+   said "Left this machine: nothing". Reading *is* still entirely local — the
+   rasterise/OCR/findings path touches no network — but asking is not, so the
+   header now names the host once a grant is given and the inspector renders a
+   ledger of what left.
+3. **F5's egress work is partly done.** Slice 5.2's acceptance criterion
+   `rg 'URLSession|http' Sources | grep -v '^Sources/Gate/'` is empty and stays
+   empty. What 5.2 still owes is the *crop* egress and the approved-set
+   assertion; the config, transport seam and failure handling are built.
+
+**The on-device tier is real, and this is the feature where it could be.**
+Apple's 4096-token window is what makes whole-document explanation need
+chunking, and it is why F4 treats Foundation Models as optional. But one OCR'd
+EPA page measures ~530 tokens — a single-page question, its instructions and its
+answer fit inside the window unchunked. So `project-overview.md` §3's *"on a
+machine with a local reasoning model, nothing leaves — full stop"* is now code
+rather than an intention: pick "On this Mac" and the question is answered
+in-process, with no consent card (nothing leaves, so there is nothing to agree
+to) and an inspector ledger that is empty by construction.
+
+**Quality of on-device answers is unmeasured.** `availability` on this machine is
+`unavailable(appleIntelligenceNotEnabled)` — eligible hardware, switch off — so
+every test injects `LocalModel.Respond`. The plumbing, the budget and the tier
+preference are covered; how good the answers are is not, and 4.3 is still the row
+that settles it.
+
+**What it does not do**, deliberately: no `Finding` is ever minted from a chat
+answer. `Finding`'s initialiser is `package` and `Tools.finding(...)` is the one
+construction point that checks the quote against the transcript (**I2**). Chat
+prose is prose — it is rendered as an answer, never promoted into the findings
+list, so I2 is untouched rather than weakened.
+
 **F3 slice 3.2 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
 by the file, and a form's field list is read straight out of the AcroForm with
 page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
@@ -58,8 +104,9 @@ feature has a spec under `context/features/`. One source of truth, per
 | F4 | Explain it | — | not started |
 | F5 | Escalate with consent | — | not started |
 | F6 | Fail honestly | — | not started |
-| F7 | Inspector mode | — | partial (step log shipped in F1) |
+| F7 | Inspector mode | — | partial (step log shipped in F1; the egress ledger shipped in F9) |
 | F8 | Export | — | not started |
+| F9 | Ask about this page | [`features/09-ask-about-this-page.md`](features/09-ask-about-this-page.md) | **complete** — 9.1, built out of order (see Current phase) |
 
 The old stage numbers survive where they are load-bearing: `coding-standards.md`
 §4 maps stages to the tests that must fail first, and F1 covers stage 1.
@@ -611,6 +658,22 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **Every `ReaderModel` state write is guarded by request *and* phase** — `requestID` alone only rejects a different open; a progress event from the current read could still land after `.ready` | consequence of the PR #9 review |
 | **`ReaderModel` takes its reader as an init parameter** — the only way to test a completion-order race is to hold the progress handler and call it late. Production always gets `Agent.read` | consequence of the PR #9 review |
 | **No demo fixtures in the product.** The two header buttons are gone; `Open…` is the only way a document enters the app. They read as a capability list — two named documents answering "what can this open?" when the answer is `Limits.formats` — and they could not have survived distribution anyway: `repoRoot` resolved them through `#filePath`, a build-machine literal | yours |
+| **The reader can ask about the page they are on** — a conversation grounded on one page, not on the document. Sending all 45 pages on every question would make "this page's text is sent" a sentence the app cannot mean | yours |
+| **The model may fetch pages it was not shown, through one tool (`read_page`), bounded at `Limits.askHops`** — the answer to "where are the woody-brush rates" is on page 34 while the reader is on page 12, and a reader who already knew which page to turn to would not be asking. On the last hop the tool is withdrawn rather than the turn abandoned, so the bound costs latency, never the answer | yours |
+| **The ask grant is per document, taken in the panel before the first question** — the same shape as the import-time grant in `project-overview.md` §4.1, for the same reason: a second prompt after the page text has already gone to that endpoint performs protection rather than providing it | yours |
+| **Chat prose never becomes a `Finding`** — `Finding`'s initialiser is `package` and `Tools.finding(...)` is the one place a quote is checked against the transcript. Promoting an answer into the findings list would make **I2** a comment. The answer names its pages instead, so a claim can be checked against the page it came from | mine |
+| **`Gate` depends on `Contracts` alone, not on `Tools`** — an egress that can reach `Tools` can read a file, and the single thing this boundary promises is that it cannot. The hop loop therefore lives in layer 4, which is the only layer that sees both the `Document` and the egress | mine |
+| **The header chip and the inspector's "left this machine" line are now conditional, not constants** — both were true by construction while no Gate layer existed. A claim that is true of the reading path and quietly false of the asking path is exactly the fallback-you-have-to-discover that `project-overview.md` §3.1 rules out | consequence of F9 |
+| **`ShortcutsSheet.opensList` takes `typing:`** — the bare-`?` monitor sees every keystroke in the app, so the moment there was a field to type a question into, "what does ? mean" opened the shortcuts sheet and ate the character. A shortcut that steals characters out of a field is worse than no shortcut | consequence of F9 |
+| **The on-device tier answers single-page questions, and is preferred over a configured endpoint when available** — 4096 tokens is the constraint that makes F4 need chunking, but one page is ~530 tokens, so this is the one workload it fits unchunked. Without it, picking "On this Mac" produced a switched-off panel: the honest option was also the useless one | yours, from review |
+| **No consent card on the on-device tier** — nothing leaves, so asking permission is the same theatre §4.1 rules out for crops. A prompt for something that does not happen reads as evidence that it does | mine |
+| **Evidence gives way before the page does when the on-device window is tight** — forty quotes are verbatim OCR lines and can outweigh the page they describe, while the page is already capped. The model can re-derive a value from the text; it cannot re-derive the text | mine |
+| **`Document.askInstructions` / `askOpening` live in layer 2, shared by both tiers** — two callers, one fact. Two copies of "how a question is grounded" would drift, and the copy that drifted would be the one that invented a date | mine |
+| **The tier picked at first run decides whether asking exists at all** — `readingTier` was a stored preference only `OnboardingScreen` read, so choosing "On this Mac" still produced a cloud-backed ask panel. That is worse than an undisclosed fallback: the reader had *explicitly declined* it. `.local` resolves to "cannot ask", not to a quieter endpoint, because no on-device question tier is built | review of PR #22 |
+| **`Limits.askPages` bounds pages, because `askHops` only bounds rounds** — one reply may legally carry a hundred `read_page` calls, so an over-eager response sent a whole document from inside a loop that called itself bounded. The budget is charged per *new* page, and calls past it get an ordinary tool result rather than a refusal, so a legitimate two-page question still works | review of PR #22 |
+| **I13 is an assertion, not an effort** — the trim loop drops the oldest turns and stops at one, which cannot help when the newest turn is itself over budget, so an oversized payload was trimmed as far as possible and posted anyway. `Gate.Failure.promptTooLarge` now refuses before the request is built, behind caps on the two unbounded inputs (a pasted question, and quotes that are verbatim OCR lines) | review of PR #22 |
+| **The egress ledger records what left, not what was attempted** — `sends` was written before the transport ran, so an offline machine still reported "page 1 text → host". Three outcomes, not two: the server answered (recorded), refused before sending (no entry), anything else (recorded as *may not have arrived*). Under-reporting egress is the dangerous direction, so unknown stays unknown rather than rounding to "nothing left" | review of PR #22 |
+| **Two onboarding cards claimed the build has no network code and sends nothing yet** — both stopped being true when layer 3 landed, and a first-run screen is the worst place to carry a stale promise | consequence of F9 |
 
 ---
 

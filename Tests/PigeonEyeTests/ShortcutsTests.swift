@@ -9,16 +9,16 @@ import Testing
 /// in the app, so a match that is too loose swallows a keystroke meant for the
 /// window underneath — `⌘?` reaches the header button, not this.
 @Test func only_a_bare_question_mark_opens_the_list() {
-    #expect(ShortcutsSheet.opensList(characters: "?", modifiers: []))
+    #expect(ShortcutsSheet.opensList(characters: "?", modifiers: [], typing: false))
     // Shift is what produces `?` on most layouts, so it cannot disqualify it.
-    #expect(ShortcutsSheet.opensList(characters: "?", modifiers: .shift))
+    #expect(ShortcutsSheet.opensList(characters: "?", modifiers: .shift, typing: false))
 
-    #expect(!ShortcutsSheet.opensList(characters: "/", modifiers: []))
-    #expect(!ShortcutsSheet.opensList(characters: nil, modifiers: []))
-    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: .command))
-    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: [.command, .shift]))
-    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: .control))
-    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: .option))
+    #expect(!ShortcutsSheet.opensList(characters: "/", modifiers: [], typing: false))
+    #expect(!ShortcutsSheet.opensList(characters: nil, modifiers: [], typing: false))
+    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: .command, typing: false))
+    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: [.command, .shift], typing: false))
+    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: .control, typing: false))
+    #expect(!ShortcutsSheet.opensList(characters: "?", modifiers: .option, typing: false))
 }
 
 /// A row with no keys or no description is a line the reader has to guess at,
