@@ -70,6 +70,10 @@ public enum Gate {
     public enum Failure: Error, LocalizedError, Equatable {
         case http(status: Int)
         case malformedReply
+        /// Refused **before** the request goes out. The distinction matters to
+        /// more than error text: `.http` means the server answered, so bytes
+        /// left the machine; this one means nothing did.
+        case promptTooLarge
 
         public var errorDescription: String? {
             switch self {
@@ -77,6 +81,17 @@ public enum Gate {
             case .http(let status) where status == 429: "the API is rate-limiting us"
             case .http(let status): "the API answered \(status)"
             case .malformedReply: "the API answered in a shape we do not understand"
+            case .promptTooLarge: "the question and its page are larger than one request allows"
+            }
+        }
+
+        /// Whether this failure happened after the request had already gone.
+        /// The inspector needs to know: reporting that nothing left when it did
+        /// is the dangerous direction for a privacy-first reader to be wrong.
+        public var afterSending: Bool {
+            switch self {
+            case .http, .malformedReply: true
+            case .promptTooLarge: false
             }
         }
     }
@@ -137,6 +152,15 @@ public enum Gate {
             carried.removeFirst()
             payload = try body(carried)
         }
+
+        // **I13 is an assertion, not an effort.** Dropping history cannot help
+        // when the *newest* turn is itself over budget, and the loop above
+        // stops at one turn — so without this guard an oversized page or a
+        // pasted wall of text was trimmed as far as possible and then posted
+        // anyway. The limit fails silently at the far end, which is exactly why
+        // it is checked at this one.
+        guard estimatedTokens(String(decoding: payload, as: UTF8.self)) <= Limits.maxPromptTokens
+        else { throw Failure.promptTooLarge }
 
         var request = URLRequest(url: config.baseURL.appending(path: "chat/completions"))
         request.httpMethod = "POST"

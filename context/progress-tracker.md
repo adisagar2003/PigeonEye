@@ -90,7 +90,7 @@ feature has a spec under `context/features/`. One source of truth, per
 | F6 | Fail honestly | — | not started |
 | F7 | Inspector mode | — | partial (step log shipped in F1; the egress ledger shipped in F9) |
 | F8 | Export | — | not started |
-| F9 | Ask about this page | — | **complete** — 9.1, built out of order (see Current phase) |
+| F9 | Ask about this page | [`features/09-ask-about-this-page.md`](features/09-ask-about-this-page.md) | **complete** — 9.1, built out of order (see Current phase) |
 
 The old stage numbers survive where they are load-bearing: `coding-standards.md`
 §4 maps stages to the tests that must fail first, and F1 covers stage 1.
@@ -649,6 +649,11 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **`Gate` depends on `Contracts` alone, not on `Tools`** — an egress that can reach `Tools` can read a file, and the single thing this boundary promises is that it cannot. The hop loop therefore lives in layer 4, which is the only layer that sees both the `Document` and the egress | mine |
 | **The header chip and the inspector's "left this machine" line are now conditional, not constants** — both were true by construction while no Gate layer existed. A claim that is true of the reading path and quietly false of the asking path is exactly the fallback-you-have-to-discover that `project-overview.md` §3.1 rules out | consequence of F9 |
 | **`ShortcutsSheet.opensList` takes `typing:`** — the bare-`?` monitor sees every keystroke in the app, so the moment there was a field to type a question into, "what does ? mean" opened the shortcuts sheet and ate the character. A shortcut that steals characters out of a field is worse than no shortcut | consequence of F9 |
+| **The tier picked at first run decides whether asking exists at all** — `readingTier` was a stored preference only `OnboardingScreen` read, so choosing "On this Mac" still produced a cloud-backed ask panel. That is worse than an undisclosed fallback: the reader had *explicitly declined* it. `.local` resolves to "cannot ask", not to a quieter endpoint, because no on-device question tier is built | review of PR #22 |
+| **`Limits.askPages` bounds pages, because `askHops` only bounds rounds** — one reply may legally carry a hundred `read_page` calls, so an over-eager response sent a whole document from inside a loop that called itself bounded. The budget is charged per *new* page, and calls past it get an ordinary tool result rather than a refusal, so a legitimate two-page question still works | review of PR #22 |
+| **I13 is an assertion, not an effort** — the trim loop drops the oldest turns and stops at one, which cannot help when the newest turn is itself over budget, so an oversized payload was trimmed as far as possible and posted anyway. `Gate.Failure.promptTooLarge` now refuses before the request is built, behind caps on the two unbounded inputs (a pasted question, and quotes that are verbatim OCR lines) | review of PR #22 |
+| **The egress ledger records what left, not what was attempted** — `sends` was written before the transport ran, so an offline machine still reported "page 1 text → host". Three outcomes, not two: the server answered (recorded), refused before sending (no entry), anything else (recorded as *may not have arrived*). Under-reporting egress is the dangerous direction, so unknown stays unknown rather than rounding to "nothing left" | review of PR #22 |
+| **Two onboarding cards claimed the build has no network code and sends nothing yet** — both stopped being true when layer 3 landed, and a first-run screen is the worst place to carry a stale promise | consequence of F9 |
 
 ---
 

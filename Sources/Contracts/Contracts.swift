@@ -334,6 +334,22 @@ public enum Limits {
     /// cannot be what pushes a request over `maxPromptTokens`.
     public static let askPageChars = 6_000
 
+    /// **How many pages may leave the machine to answer one question**, however
+    /// many the model asks for.
+    ///
+    /// `askHops` bounds *rounds*, not pages — one reply may legally carry a
+    /// hundred `read_page` calls, and processing them all would send an entire
+    /// document inside a "bounded" loop. This is the bound that actually holds
+    /// the privacy and billing promise, because it counts the thing that leaves.
+    public static let askPages = 6
+
+    /// The longest quote carried as evidence with a question, and the longest
+    /// question accepted. Both are unbounded at their source — a quote is a
+    /// verbatim OCR line and a question is whatever was pasted into the field —
+    /// so both are capped before they can be what puts a request over budget.
+    public static let askQuoteChars = 300
+    public static let askQuestionChars = 2_000
+
     /// How many earlier turns travel with a question. Enough to follow up
     /// ("and the one below it?"), bounded so a long conversation cannot grow
     /// the payload without limit.

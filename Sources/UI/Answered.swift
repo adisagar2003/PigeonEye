@@ -47,7 +47,16 @@ public func answered(
     turns.append(Turn(role: .user, text: opening(doc, page: page, question: question)))
 
     var used = [page]
-    var sends = [record(page: page, chars: pageText(doc, page)?.count ?? 0, to: config.host)]
+    var sends: [String] = []
+
+    /// Pages loaded into the request that has not gone out yet. They move into
+    /// `sends` only once the wire has actually carried them.
+    ///
+    /// The ledger used to be written *before* the transport ran, so an offline
+    /// machine or a refused-before-sending prompt still produced a
+    /// "page N text → host" line. Claiming text left when it did not is the
+    /// dangerous direction for this app to be wrong in.
+    var loaded = [(page: page, chars: pageText(doc, page)?.count ?? 0)]
 
     // Bounded (**I10**). The last pass withdraws the tool rather than
     // abandoning the turn, so the bound costs a hop, never the answer.
@@ -58,11 +67,15 @@ public func answered(
             reply = try await Gate.answer(turns, system: instructions(doc),
                                           offerTool: !last, config: config, transport: transport)
         } catch {
+            sends.append(contentsOf: ledger(loaded, to: config.host, sent: sent(error)))
             return Answer(text: "That question could not be answered — \(why(error)).",
                           pagesUsed: used,
                           note: "The document on screen is unchanged; nothing about it was lost.",
                           sends: sends)
         }
+
+        sends.append(contentsOf: ledger(loaded, to: config.host, sent: .yes))
+        loaded = []
 
         guard !reply.calls.isEmpty else {
             return Answer(text: reply.text, pagesUsed: used,
@@ -71,12 +84,34 @@ public func answered(
 
         turns.append(Turn(role: .assistant, text: reply.text, calls: reply.calls))
         for call in reply.calls {
+            // **The bound that counts what leaves.** `askHops` bounds rounds,
+            // and one reply may legally carry a hundred `read_page` calls — so
+            // without this a single over-eager response sends the whole
+            // document inside a loop that calls itself bounded.
+            guard used.count < Limits.askPages else {
+                turns.append(Turn(
+                    role: .tool,
+                    text: """
+                        That page was not sent. One question may use \(Limits.askPages) pages \
+                        and this one has used them. Answer from what you have, or say which \
+                        single page would settle it.
+                        """,
+                    callID: call.id))
+                continue
+            }
+
             let wanted = call.requestedPage
             let text = wanted.flatMap { pageText(doc, $0) }
             if let wanted, let text {
-                // Only count a page as used once, however often it is asked for.
-                if !used.contains(wanted) { used.append(wanted) }
-                sends.append(record(page: wanted, chars: text.count, to: config.host))
+                // Only count a page as used once, however often it is asked for
+                // — and only charge the budget for one that is actually new.
+                guard !used.contains(wanted) else {
+                    turns.append(Turn(role: .tool, text: "Page \(wanted) is already above.",
+                                      callID: call.id))
+                    continue
+                }
+                used.append(wanted)
+                loaded.append((wanted, text.count))
                 turns.append(Turn(role: .tool, text: "Page \(wanted):\n\(text)", callID: call.id))
             } else {
                 // A page that was never read has no text, and saying so is
@@ -146,13 +181,16 @@ private func opening(_ doc: Document, page: Int, question: String) -> String {
     if !onPage.isEmpty {
         lines.append("")
         lines.append("Values already recognised on this page, with the words they came from:")
+        // Both bounds matter. A quote is a verbatim OCR line and a page can
+        // carry many of them, so 40 unbounded quotes is an unbounded payload —
+        // and an unbounded payload is what I13 is asserted against downstream.
         lines.append(contentsOf: onPage.prefix(40).map {
-            "  \($0.label): \($0.value ?? "—") — \"\($0.quote)\""
+            "  \($0.label): \($0.value ?? "—") — \"\($0.quote.prefix(Limits.askQuoteChars))\""
         })
     }
 
     lines.append("")
-    lines.append("Their question: \(question)")
+    lines.append("Their question: \(question.prefix(Limits.askQuestionChars))")
     return lines.joined(separator: "\n")
 }
 
@@ -163,11 +201,31 @@ private func pageText(_ doc: Document, _ number: Int) -> String? {
     return String(doc.pages[number - 1].transcript.prefix(Limits.askPageChars))
 }
 
+/// Whether the bytes reached the far end.
+private enum Sent { case yes, no, unknown }
+
+/// Three answers, not two, because two would force a guess.
+///
+/// A failure the server produced means the bytes left. `promptTooLarge` is
+/// raised **before** the request is built, so nothing left and nothing is
+/// recorded. Everything else — a dropped connection part-way through a write —
+/// is genuinely unknown, and is reported as unknown rather than rounded down to
+/// "nothing left": under-reporting egress is the dangerous direction here.
+private func sent(_ error: Error) -> Sent {
+    guard let failure = error as? Gate.Failure else { return .unknown }
+    if case .promptTooLarge = failure { return .no }
+    return failure.afterSending ? .yes : .unknown
+}
+
 /// What the inspector is allowed to say about a send: which page, how much of
-/// it, and where it went. Never the words themselves, never the filename, never
-/// the key (`coding-standards.md` §5.2).
-private func record(page: Int, chars: Int, to host: String) -> String {
-    "page \(page) text → \(host) · \(chars) chars"
+/// it, where it went, and whether it arrived. Never the words themselves, never
+/// the filename, never the key (`coding-standards.md` §5.2).
+private func ledger(_ pages: [(page: Int, chars: Int)], to host: String, sent: Sent) -> [String] {
+    guard sent != .no else { return [] }
+    return pages.map {
+        let line = "page \($0.page) text → \(host) · \($0.chars) chars"
+        return sent == .yes ? line : line + " · send failed, may not have arrived"
+    }
 }
 
 private func why(_ error: Error) -> String {

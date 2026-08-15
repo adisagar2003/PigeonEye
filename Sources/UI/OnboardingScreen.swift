@@ -46,10 +46,11 @@ public struct OnboardingScreen: View {
         public var detail: String {
             switch self {
             case .openAI:
-                "Crops and transcript text leave the machine, and only inside the "
-                    + "consent you give when you import a document."
+                "The text of a page you ask about leaves the machine, and only "
+                    + "after you agree to it for that document."
             case .local:
-                "Apple's on-device model. Nothing leaves, and there is no key to supply."
+                "Nothing leaves, and there is no key to supply — so asking a "
+                    + "question is switched off until the on-device tier is built."
             }
         }
     }
@@ -73,11 +74,13 @@ public struct OnboardingScreen: View {
                       copy.
                       """),
         .init(kicker: "Where it runs",
-              title: "On this machine, and only this machine",
+              title: "Reading happens here, and only here",
               detail: """
-                      Rendering and reading both happen here. This build has no \
-                      network code in it at all, and the inspector shows every \
-                      step it took and what left the machine: nothing.
+                      Rendering and reading both happen on this machine — no \
+                      page image and no file ever leaves it. The one thing that \
+                      can leave is the text of a page you ask a question about, \
+                      and only after you say so. The inspector lists every page \
+                      that left, or says nothing did.
                       """),
         .init(kicker: "What you get",
               title: "Every page, or an honest gap",
@@ -88,13 +91,13 @@ public struct OnboardingScreen: View {
                       skipped.
                       """),
         .init(kicker: "Which model",
-              title: "OpenAI reads it, unless you say otherwise",
+              title: "OpenAI answers questions, unless you say otherwise",
               detail: """
-                      When a page is too unclear to settle here, the question \
-                      goes to OpenAI — crops and transcript text, only under the \
-                      consent you give at import. Pick On this Mac and nothing \
-                      leaves at all. Either way this build sends nothing yet: \
-                      the card before this one is still true.
+                      Ask about a page and its text goes to OpenAI, once you \
+                      agree to it for that document. Pick On this Mac and \
+                      nothing leaves at all — and asking is switched off, \
+                      because the on-device tier is not built yet. Reading \
+                      works the same either way.
                       """,
               picksTier: true),
     ]

@@ -575,6 +575,8 @@ restricted-entry interval here?". Then ask "where are the woody-brush rates?" â€
 the answer names page 34, a page the model was never shown, and the inspector
 lists both pages as having left.
 
+**Spec:** [`context/features/09-ask-about-this-page.md`](context/features/09-ask-about-this-page.md)
+
 **Done when:** 9.1 passes.
 
 **Why it is not part of F4.** F4 explains the *document*, once, unprompted. This

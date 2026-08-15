@@ -53,12 +53,15 @@ public final class ReaderModel {
     /// call it late. Production always gets `Agent.read`.
     private let read: @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
 
-    /// `nil` when there is no key in the environment, and the panel then offers
-    /// no box to type in. A field that cannot send is worse than no field.
+    /// `nil` when asking cannot happen — no key in the environment, or the
+    /// reader picked a tier that does not send. The panel then offers no box to
+    /// type in: a field that cannot send is worse than no field.
     ///
     /// Injectable for the same reason `read` is: a test that asserts nothing
     /// leaves the machine has to be able to watch the thing that would send it.
-    public let cloud: Gate.Config?
+    public private(set) var cloud: Gate.Config?
+    /// What the environment offers, before the tier has an opinion about it.
+    private let configured: Gate.Config?
     private let transport: Gate.Transport
 
     public init(
@@ -68,8 +71,29 @@ public final class ReaderModel {
         transport: @escaping Gate.Transport = Gate.defaultTransport
     ) {
         self.read = read
+        self.configured = cloud
         self.cloud = cloud
         self.transport = transport
+    }
+
+    /// Honour the tier the reader picked at first run.
+    ///
+    /// **This is what makes "On this Mac" mean anything.** Without it the tier
+    /// was a stored preference that only the onboarding screen ever read, so
+    /// choosing the local option still produced a cloud-backed ask panel — the
+    /// exact "fallback you have to discover" `project-overview.md` §3.1 rules
+    /// out, and worse, because the reader had explicitly declined it.
+    public func honour(_ tier: OnboardingScreen.Tier) {
+        cloud = Self.askConfig(tier: tier, offered: configured)
+    }
+
+    /// Pure, so the rule is testable without a window. There is no local
+    /// question tier yet — `Agent.localModelAvailable()` reports whether macOS
+    /// has the model, but nothing here opens a session with it — so `.local`
+    /// resolves to "cannot ask" rather than to a quieter endpoint.
+    nonisolated public static func askConfig(tier: OnboardingScreen.Tier,
+                                             offered: Gate.Config?) -> Gate.Config? {
+        tier == .openAI ? offered : nil
     }
 
     /// Identifies the newest request. Every `await` in this file is a point where

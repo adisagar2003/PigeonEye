@@ -30,6 +30,12 @@ public struct ReaderScreen: View {
     /// existing installs see the explainer once more.
     @AppStorage("onboardingSeen") private var onboardingSeen = false
 
+    /// The tier chosen at first run, and the same store `OnboardingScreen`
+    /// writes. Read here because this is where it has to take effect: a reader
+    /// who answered "on this Mac" and is then handed a cloud ask panel was not
+    /// actually asked anything.
+    @AppStorage("readingTier") private var tier = OnboardingScreen.Tier.preferred
+
     public init() {}
 
     public var body: some View {
@@ -66,6 +72,12 @@ public struct ReaderScreen: View {
         // one key it *would* name (Shift-/) is a US-layout fact rather than a
         // property of the key. A local monitor sees the character the layout
         // actually produced, and does not depend on which control holds focus.
+        // The tier is a stored preference, and a preference nothing reads is a
+        // setting that lies. Applied on appear and again whenever it changes,
+        // so "On this Mac" actually turns the ask panel off rather than merely
+        // being remembered.
+        .onAppear { model.honour(tier) }
+        .onChange(of: tier) { _, picked in model.honour(picked) }
         .onAppear {
             guard keyWatch == nil else { return }
             keyWatch = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -482,8 +494,12 @@ public struct ReaderScreen: View {
                 }
             } else {
                 // A box that cannot send is worse than no box. Say what is
-                // missing rather than failing on the first press.
-                Text("No key is set, so nothing can be asked. Export OPENAI_KEY and reopen.")
+                // missing rather than failing on the first press — and say
+                // which of the two reasons it is, because one is the reader's
+                // own choice and telling them to set a key would be wrong.
+                Text(tier == .openAI
+                     ? "No key is set, so nothing can be asked. Export OPENAI_KEY and reopen."
+                     : "You chose On this Mac, so nothing leaves — and asking needs a model that runs here, which is not built yet.")
                     .font(.body(11.5)).foregroundStyle(Ink.neutral600)
                     .fixedSize(horizontal: false, vertical: true)
             }

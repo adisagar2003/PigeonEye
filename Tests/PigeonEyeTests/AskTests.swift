@@ -247,7 +247,123 @@ private final class Recorder: @unchecked Sendable {
     #expect(!record.contains("pigeoneye-ask"), "the filename is in the inspector record")
 }
 
-// MARK: - 6 · The `?` monitor, which now has a text field to share the app with
+// MARK: - 6 · The tier the reader picked has to mean something
+
+/// **The disclosure bug.** `readingTier` was a stored preference only the
+/// onboarding screen ever read, so a reader who chose "On this Mac" was still
+/// handed a cloud-backed ask panel. Worse than an undisclosed fallback: one the
+/// reader had explicitly declined.
+@Test func choosing_on_this_mac_turns_asking_off() throws {
+    let offered = try config()
+    #expect(ReaderModel.askConfig(tier: .openAI, offered: offered) == offered)
+    #expect(ReaderModel.askConfig(tier: .local, offered: offered) == nil,
+            "the local tier still resolves to a cloud endpoint")
+}
+
+@MainActor
+@Test func the_local_tier_sends_nothing_even_with_a_key_in_the_environment() async throws {
+    let tap = Recorder([says("hello")])
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: tap.transport)
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.honour(.local)
+
+    #expect(model.cloud == nil, "the panel would still offer a field")
+    model.grantAsk()
+    await model.ask("what does this say?")
+    #expect(tap.sent.isEmpty, "the reader declined the cloud and it was sent anyway")
+}
+
+// MARK: - 7 · I13 is an assertion, not an effort
+
+/// Dropping history cannot help when the *newest* turn is over budget, and the
+/// trim loop stops at one turn — so an oversized page or a pasted wall of text
+/// used to be trimmed as far as possible and then posted regardless.
+@Test func an_oversized_question_is_refused_before_anything_is_sent() async throws {
+    let tap = Recorder([says("never reached")])
+    let huge = String(repeating: "x", count: Limits.maxPromptTokens * 8)
+
+    await #expect(throws: Gate.Failure.promptTooLarge) {
+        try await Gate.answer([Turn(role: .user, text: huge)], system: "s",
+                              offerTool: false, config: try config(), transport: tap.transport)
+    }
+    #expect(tap.sent.isEmpty, "an over-budget request went out anyway (I13)")
+}
+
+/// The guard above is the backstop. The first line of defence is that the two
+/// unbounded inputs — a pasted question, and quotes that are verbatim OCR lines
+/// — are capped before they can reach it. Together they mean a real document
+/// cannot produce a refused request, which is why the guard is unreachable in
+/// practice and still worth having.
+@Test func a_pasted_wall_of_text_is_capped_rather_than_refused() async throws {
+    let tap = Recorder([says("fine")])
+    let wall = String(repeating: "x", count: Limits.maxPromptTokens * 8)
+    let answer = await answered(document(), page: 1, question: wall,
+                                history: [], config: try config(), transport: tap.transport)
+
+    #expect(tap.sent.count == 1, "a capped question should still be answerable")
+    #expect(answer.text == "fine")
+    #expect(Gate.estimatedTokens(tap.wire) <= Limits.maxPromptTokens,
+            "the request went out over budget (I13)")
+    #expect(tap.wire.count < wall.count, "the question was not capped")
+}
+
+// MARK: - 8 · The bound that counts what leaves
+
+/// `askHops` bounds *rounds*, not pages. One reply may legally carry a hundred
+/// `read_page` calls, and processing them all sends a whole document inside a
+/// loop that calls itself bounded.
+@Test func one_over_eager_reply_cannot_send_the_whole_document() async throws {
+    // Ten pages, and a reply that asks for every one of them at once.
+    let calls = (2...10).map { number in
+        ["id": "call_\(number)", "type": "function",
+         "function": ["name": "read_page", "arguments": "{\"page\": \(number)}"]] as [String: Any]
+    }
+    let greedy = try! JSONSerialization.data(withJSONObject: [
+        "choices": [["message": ["role": "assistant", "content": NSNull(), "tool_calls": calls]]],
+    ])
+
+    let tap = Recorder([greedy, says("done")])
+    let answer = await answered(document(pages: 10), page: 1, question: "everything?",
+                                history: [], config: try config(), transport: tap.transport)
+
+    #expect(answer.pagesUsed.count <= Limits.askPages,
+            "one reply sent \(answer.pagesUsed.count) pages past a bound of \(Limits.askPages)")
+    for number in answer.pagesUsed where number > Limits.askPages + 1 {
+        Issue.record("page \(number) left the machine despite the budget")
+    }
+}
+
+// MARK: - 9 · The ledger records what left, not what was attempted
+
+/// `sends` used to be written *before* the transport ran, so an offline machine
+/// still produced "page 1 text → host". Claiming text left when it did not is
+/// the dangerous direction for a privacy-first reader to be wrong in.
+@Test func an_offline_machine_does_not_report_text_as_having_left() async throws {
+    let offline: Gate.Transport = { _ in throw URLError(.notConnectedToInternet) }
+    let answer = await answered(document(), page: 1, question: "?",
+                                history: [], config: try config(), transport: offline)
+
+    #expect(answer.sends.allSatisfy { $0.contains("may not have arrived") },
+            "an unsent page is listed as having left the machine")
+}
+
+/// A 401 is the server answering, so the bytes did leave. Under-reporting that
+/// is the same failure in the opposite direction.
+@Test func a_rejected_request_still_reports_that_the_text_left() async throws {
+    let refuse: Gate.Transport = { request in
+        (Data(), HTTPURLResponse(url: request.url!, statusCode: 401,
+                                 httpVersion: nil, headerFields: nil)!)
+    }
+    let answer = await answered(document(), page: 1, question: "?",
+                                history: [], config: try config(), transport: refuse)
+
+    #expect(answer.sends.count == 1)
+    #expect(!answer.sends[0].contains("may not have arrived"),
+            "the server answered, so the page did leave — saying otherwise under-reports egress")
+}
+
+// MARK: - 10 · The `?` monitor, which now has a text field to share the app with
 
 /// The bare-`?` monitor sees every keystroke in the app, including the ones
 /// meant for the ask field. Before this, typing "what does ? mean" opened the
