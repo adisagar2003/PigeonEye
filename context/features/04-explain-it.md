@@ -142,6 +142,25 @@ No test here touches the network: the transport is injected.
 
 ---
 
+## 6.1 What review found, and what it cost to fix
+
+Four defects, and three of them were the same defect wearing different clothes:
+**the screen said less had left the machine than actually had.**
+
+| Found | Was | Is |
+|---|---|---|
+| **Egress reported as local-only after the POST** | A 401/429/500 fell back with "Read on this machine only" and the inspector said "Left this machine: nothing". The transcript was already at the far end. | `explained` returns a ledger beside the explanation. Anything the server answered — including a refusal — records the send. Only a refusal raised *before* the request was built records nothing. **Tested** over 401/429/500/503, offline, garbled and refused-before-sending. |
+| **I13 was an effort, not an assertion** | The trim loop only cuts the transcript, so 60 long evidence quotes could stay over the ceiling with the transcript cut to nothing — and the request went out anyway, to fail silently. | A `guard` after the loop throws `promptTooLarge`, the one failure that means nothing left. **Tested** with an oversized fixed block, asserting the transport is never reached. |
+| **A partial reply replaced a complete local one** | `summary` absent became `[]`, an unrecognised `urgency` became `.informational`. A model could blank the checklist or downgrade the urgency and report success. | Every Tier 1 field is required and whitespace-only entries are dropped before the check. A partial reply is `malformedReply`, so 4.1 stands (**I6**). **Tested** six ways. |
+| **The first-run disclosure understated egress** | It named only the ask path — "the text of a page you ask about". Explain sends the whole transcript. | Both paths named, on the card and on the tier picker. |
+| **The model self-rating was carried but never shown** | The inspector rendered only the document's local log, so **I4**'s breakdown requirement was unmet. | The inspector lists the explanation's signals and labels the self-rating "not used for the band" where the number is. |
+
+The shared piece is `Sent` / `sent(_:)` / `why(_:)`, now used by both egress
+paths rather than duplicated. Two copies of the judgement "did it leave?" is how
+they drift into disagreeing.
+
+---
+
 ## 7. Out of scope
 
 Slice **4.3** (measure a local reasoning tier) — open, and no longer a gate: the

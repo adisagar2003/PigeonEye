@@ -212,3 +212,156 @@ private actor Box {
     private(set) var value: Data?
     func set(_ data: Data?) { value = data }
 }
+
+// MARK: - 4 · What the inspector is allowed to say about egress
+//
+// Every test below exists because the first version of this slice reported
+// "Read on this machine only" over a request that had already been answered by
+// a server. The reading was local; the *transcript* was not, and telling a
+// privacy-first reader otherwise is the one direction this app must never be
+// wrong in.
+
+/// A server that answers at all — even to refuse — has already been sent the
+/// bytes. The ledger must record that, whatever the status code says.
+@Test(arguments: [401, 429, 500, 503])
+func a_failure_the_server_produced_still_records_what_left(status: Int) async throws {
+    let transport: Gate.Transport = { request in
+        (Data("{}".utf8),
+         HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: nil)!)
+    }
+
+    let (result, sends) = await explained(document(), config: try config(), transport: transport)
+
+    #expect(result.source == .local, "a \(status) took the screen away")
+    #expect(sends.count == 1, "a \(status) answered, so the transcript had already left — and was not recorded")
+    #expect(sends[0].contains("api.openai.com"), "the ledger did not name where it went")
+    #expect(result.note?.contains("Read on this machine only") != true,
+            "a \(status) is a false privacy claim: the text was already sent")
+}
+
+/// The happy path records too — otherwise the failure tests above could pass
+/// while the ledger was simply always full.
+@Test func a_successful_explain_records_what_left() async throws {
+    let transport: Gate.Transport = { _ in (replyData, okResponse) }
+    let (result, sends) = await explained(document(), config: try config(), transport: transport)
+
+    #expect(result.source == .model)
+    #expect(sends.count == 1)
+    #expect(sends[0].contains("chars"), "the ledger did not say how much left")
+}
+
+/// A reply that decoded but said nothing useful still means the bytes left.
+@Test func a_garbled_reply_records_what_left() async throws {
+    let transport: Gate.Transport = { _ in (Data("not json at all".utf8), okResponse) }
+    let (_, sends) = await explained(document(), config: try config(), transport: transport)
+
+    #expect(sends.count == 1, "the request was answered, so it had already gone")
+}
+
+/// The one case where "nothing left" is true: the transport was never reached.
+/// Recorded as unknown rather than as a clean send, because a connection that
+/// dropped mid-write is not a send that did not happen.
+@Test func an_unreachable_endpoint_is_reported_as_unknown_not_as_silence() async throws {
+    let transport: Gate.Transport = { _ in throw URLError(.notConnectedToInternet) }
+    let (result, sends) = await explained(document(), config: try config(), transport: transport)
+
+    #expect(result.source == .local)
+    #expect(sends.count == 1)
+    #expect(sends[0].contains("may not have arrived"),
+            "an interrupted send was rounded down to a clean one")
+}
+
+// MARK: - 5 · A partial reply is a failure, not a result
+
+/// **The local explanation may only ever be added to (I6).** A reply that
+/// decodes but carries no summary used to become an `Explanation` with an empty
+/// checklist, replacing a complete local one and reporting success.
+@Test(arguments: [
+    // no summary at all
+    #"{"what_it_is":"A letter.","urgency":"soon","next_steps":["Do the thing."]}"#,
+    // summary present but empty
+    #"{"what_it_is":"A letter.","summary":[],"urgency":"soon","next_steps":["Do it."]}"#,
+    // summary of blank strings — decodes, says nothing
+    #"{"what_it_is":"A letter.","summary":["  "],"urgency":"soon","next_steps":["Do it."]}"#,
+    // no next steps
+    #"{"what_it_is":"A letter.","summary":["It is accepted."],"urgency":"soon"}"#,
+    // an urgency outside the contract, which used to silently become .informational
+    #"{"what_it_is":"A letter.","summary":["It is accepted."],"urgency":"whenever","next_steps":["Do it."]}"#,
+    // what_it_is blank
+    #"{"what_it_is":"   ","summary":["It is accepted."],"urgency":"soon","next_steps":["Do it."]}"#,
+])
+func an_incomplete_reply_cannot_replace_the_local_explanation(payload: String) async throws {
+    let envelope = try JSONSerialization.data(
+        withJSONObject: ["choices": [["message": ["content": payload]]]])
+    let transport: Gate.Transport = { _ in (envelope, okResponse) }
+
+    let doc = document(fields: 63)
+    let local = explain(doc)
+    let (result, _) = await explained(doc, config: try config(), transport: transport)
+
+    #expect(result.source == .local, "a partial reply replaced a complete local explanation")
+    #expect(result.summary == local.summary, "the local checklist was blanked by a partial reply")
+    #expect(result.urgency == local.urgency, "the local urgency was overwritten by a partial reply")
+}
+
+// MARK: - 6 · I13 is an assertion, not an effort
+
+/// The trim loop only cuts the transcript. When the *fixed* part of the request
+/// — the instructions plus the evidence lines — is itself over the ceiling,
+/// trimming cannot help, and the request used to go out anyway to fail silently
+/// at the far end.
+@Test func an_oversized_fixed_block_is_refused_before_anything_is_sent() async throws {
+    // One finding per line, each quote long enough that 60 of them alone blow
+    // the budget. The transcript is empty, so nothing the loop can cut helps.
+    let huge = String(repeating: "x", count: 4_000)
+    let findings = (0..<60).map { _ in
+        Finding(id: UUID().uuidString, label: "Quote", value: nil, conf: 0.9,
+                quote: huge, page: 1,
+                region: Region(x: 0, y: 0, width: 1, height: 0.01),
+                origin: .datadetector, signals: [])
+    }
+
+    let reached = Reached()
+    let transport: Gate.Transport = { _ in
+        await reached.mark()
+        return (replyData, okResponse)
+    }
+
+    await #expect(throws: Gate.Failure.promptTooLarge) {
+        try await Gate.explain(transcript: "", findings: findings, isForm: false,
+                               fieldCount: 0, config: try config(), transport: transport)
+    }
+    #expect(await reached.hit == false, "an over-budget request was sent anyway")
+}
+
+/// And the refusal is the one failure that means nothing left, so it must
+/// produce an empty ledger — not an "unknown".
+@Test func a_refusal_before_sending_records_no_egress() async throws {
+    let huge = String(repeating: "x", count: 4_000)
+    let doc = Document(
+        url: URL(fileURLWithPath: "/tmp/pigeoneye-test.pdf"), kind: .pdf,
+        pageCount: 1, pagesRead: 1, capped: false,
+        pages: [Page(transcript: "x", lines: [], tables: 0, lists: 0, data: [:])],
+        failedPages: [], fields: [],
+        findings: (0..<60).map { _ in
+            Finding(id: UUID().uuidString, label: "Quote", value: nil, conf: 0.9,
+                    quote: huge, page: 1,
+                    region: Region(x: 0, y: 0, width: 1, height: 0.01),
+                    origin: .datadetector, signals: [])
+        },
+        log: [])
+
+    let transport: Gate.Transport = { _ in (replyData, okResponse) }
+    let (result, sends) = await explained(doc, config: try config(), transport: transport)
+
+    #expect(result.source == .local)
+    #expect(sends.isEmpty, "nothing was sent, but the inspector was told something was")
+    #expect(result.note?.contains("Read on this machine only") == true,
+            "nothing left, so the local claim is the true one and should be made")
+}
+
+/// A tiny actor, because the transport closure is `@Sendable`.
+private actor Reached {
+    private(set) var hit = false
+    func mark() { hit = true }
+}

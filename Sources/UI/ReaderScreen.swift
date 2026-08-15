@@ -975,6 +975,34 @@ public struct ReaderScreen: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            // **I4 requires the breakdown, not just the band.** The explanation
+            // carries two kinds of signal and they are not interchangeable: how
+            // well the pages under the summary were actually read, and what the
+            // model said about its own work. Rendering them as one list of
+            // percentages would imply the second one counted. It never does —
+            // `Confidence.compose` returns nil when the model's self-report is
+            // all there is — so the label says so where the number is.
+            if let explanation = model.explanation, !explanation.signals.isEmpty {
+                Rectangle().fill(Ink.divider).frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Explanation confidence:")
+                        .font(.body(11.5)).foregroundStyle(Ink.neutral700)
+                    ForEach(explanation.signals, id: \.name) { signal in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(signal.name == Signal.model
+                                 ? "model self-rating · not used for the band"
+                                 : signal.name)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .foregroundStyle(signal.name == Signal.model ? Ink.neutral600 : Ink.accent700)
+                            Text("\(Int((signal.value * 100).rounded()))%")
+                                .foregroundStyle(Ink.neutral700)
+                        }
+                        .font(.mono(10.5))
+                    }
+                }
+            }
         }
         .padding(.horizontal, 18).padding(.vertical, 15)
         .frame(maxWidth: .infinity, alignment: .leading)

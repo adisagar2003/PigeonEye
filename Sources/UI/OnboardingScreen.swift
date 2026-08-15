@@ -57,11 +57,13 @@ public struct OnboardingScreen: View {
         public var detail: String {
             switch self {
             case .openAI:
-                "The text of a page you ask about leaves the machine, and only "
-                    + "after you agree to it for that document."
+                "The text you ask about — or the whole document, if you press "
+                    + "Explain — leaves the machine, and only after you agree "
+                    + "to it for that document."
             case .local:
-                "Apple's on-device model answers your questions here. Nothing "
-                    + "leaves, and there is no key to supply."
+                "Apple's on-device model answers your questions here, and the "
+                    + "explanation is the one this app assembles itself. "
+                    + "Nothing leaves, and there is no key to supply."
             }
         }
     }
@@ -88,10 +90,11 @@ public struct OnboardingScreen: View {
               title: "Reading happens here, and only here",
               detail: """
                       Rendering and reading both happen on this machine — no \
-                      page image and no file ever leaves it. The one thing that \
-                      can leave is the text of a page you ask a question about, \
-                      and only after you say so. The inspector lists every page \
-                      that left, or says nothing did.
+                      page image and no file ever leaves it. Two things can \
+                      leave, both only after you say so: the text of a page you \
+                      ask about, and the text of the document if you press \
+                      Explain with OpenAI. The inspector lists everything that \
+                      left, or says nothing did.
                       """),
         .init(kicker: "What you get",
               title: "Every page, or an honest gap",
@@ -105,10 +108,11 @@ public struct OnboardingScreen: View {
               title: "OpenAI answers questions, unless you say otherwise",
               detail: """
                       Ask about a page and its text goes to OpenAI, once you \
-                      agree to it for that document. Pick On this Mac and \
-                      Apple's on-device model answers instead — nothing leaves, \
-                      and there is nothing to agree to. Reading is local either \
-                      way.
+                      agree to it for that document; Explain with OpenAI sends \
+                      the document's text the same way. Pick On this Mac and \
+                      Apple's on-device model answers questions here instead — \
+                      nothing leaves, no key, and the explanation is the one \
+                      this app assembles itself. Reading is local either way.
                       """,
               picksTier: true),
     ]

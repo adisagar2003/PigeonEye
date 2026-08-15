@@ -77,6 +77,18 @@ of its own here. Choosing "On this Mac" means the locally-assembled explanation
 and nothing more — no cloud button, which is the point, but no on-device prose
 either.
 
+**Review found four defects and three were one defect: the screen under-reported
+egress.** A 401/429/500 fell back saying "Read on this machine only" while the
+inspector said nothing had left — after the transcript had already been answered
+by a server. I13 was asserted only against the part of the request that could be
+trimmed, so an oversized fixed block was posted anyway. And a reply that decoded
+but carried no summary replaced a complete local explanation with an empty
+checklist, which is **I6** inverted. All three now have tests that fail without
+the fix; `features/04-explain-it.md` §6.1 is the table. Under-reporting egress is
+the dangerous direction for this product to be wrong in, and it is the direction
+it was wrong in three times in one slice — worth remembering when F5 adds crop
+egress on top.
+
 **F3 slice 3.2 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
 by the file, and a form's field list is read straight out of the AcroForm with
 page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
