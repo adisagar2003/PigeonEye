@@ -60,22 +60,51 @@ public func validate(_ text: String, using format: Format) -> Bool {
     return (try? pattern(for: format).wholeMatch(in: text)) .flatMap { $0 } != nil
 }
 
+/// Evidence that a detected "date" contains a date at all.
+///
+/// Apple's `calendarEvent` detector reads a rate range as a date: `1.6-2.4` and
+/// `0.07 - 0.10` off the EPA rate tables, bare `Saturday` off the tax guide. 80
+/// of 114 matches across `assets/` carried no date in them, and they land in the
+/// one group a reader opens to find a deadline. A month name or a numeric
+/// `d/m` is the cheapest thing that separates the two, and it keeps every real
+/// date the corpus contains — including `FEB 15 2011` off a rubber stamp.
+/// (A function rather than a stored global: `Regex` is not `Sendable`, and the
+/// other patterns in this file are built per call for the same reason.)
+private func dateEvidence() -> Regex<Substring> {
+    /(?i:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)|\d{1,2}\/\d{1,2}/
+}
+
 /// Every deterministic finding on one page, 1-based.
 ///
 /// Async because `dataDetectorMatches` is an `AsyncSequence`. Nothing here
 /// awaits I/O — there is none to await.
 public func findings(on page: Page, number: Int) async -> [Finding] {
     var found: [Finding] = []
-    var seen = Set<String>()
+    var at: [String: Int] = [:]
 
+    /// **Merge, not first-wins.** One value in one place is one row, whichever
+    /// producers reached it: `$1,000` is matched by the `amount` validator *and*
+    /// by `moneyAmount`, which is 693 and 695 rows over the same 120 pages of
+    /// IRS P17. Two rows there are not two facts, they are one fact said twice.
+    ///
+    /// The validator wins the collision because it is the half that can say no —
+    /// a detector reports what it parsed and carries no verdict, so keeping it
+    /// would throw away the `validated` flag §12 ranks highest.
     func keep(_ candidate: Finding?) {
         guard let candidate else { return }
-        // Same words, same place, same shape — one row. "18 months" appears
-        // twice in one sentence of the EPA letter and both occurrences share a
-        // line, so they share a region and there is nothing to tell them apart.
-        let key = "\(candidate.label)|\(candidate.value ?? "")|\(candidate.region.map { "\($0.x),\($0.y)" } ?? "")"
-        guard seen.insert(key).inserted else { return }
-        found.append(candidate)
+        // Region and value, not label: the label is what a producer *called* it,
+        // and the whole point is that two producers name one value differently.
+        // ("18 months" appears twice in one sentence of the EPA letter, on one
+        // line — same region, nothing to tell them apart, one row.)
+        let key = "\(candidate.value ?? "")|\(candidate.region.map { "\($0.x),\($0.y)" } ?? "")"
+        guard let index = at[key] else {
+            at[key] = found.count
+            found.append(candidate)
+            return
+        }
+        if found[index].origin == .datadetector, candidate.origin == .validator {
+            found[index] = candidate
+        }
     }
 
     for line in page.lines {
@@ -83,14 +112,20 @@ public func findings(on page: Page, number: Int) async -> [Finding] {
         // gives per-line boxes and word boxes would need a second request.
         // F5 crops this region, so a tighter box is an upgrade, not a fix.
         let region = line.region
+        let context = line.text.lowercased()
 
         for format in Format.allCases {
+            // The shape is not the claim. `Format.cue` names the words the line
+            // must carry before this format may put its name on a value — see
+            // the 88% measured there.
+            if let cue = format.cue, !cue.allSatisfy(context.contains) { continue }
+
             for match in line.text.matches(of: candidatePattern(for: format)) {
                 let quote = String(match.output)
                 let validated = validate(quote, using: format)
                 keep(
                     finding(
-                        label: format.label, value: quote, quote: quote,
+                        label: format.label, kind: format.kind, value: quote, quote: quote,
                         page: number, region: region,
                         origin: .validator, validated: validated,
                         conf: Double(line.conf),
@@ -102,9 +137,13 @@ public func findings(on page: Page, number: Int) async -> [Finding] {
         for await match in line.text.dataDetectorMatches() {
             guard let range = match.range else { continue }
             let quote = String(line.text[range])
+            let type = detected(match.details)
+            // A detector that names a date without one in it is not describing
+            // this value, it is guessing at it.
+            if type.kind == .date, quote.firstMatch(of: dateEvidence()) == nil { continue }
             keep(
                 finding(
-                    label: typeName(match.details), value: quote, quote: quote,
+                    label: type.label, kind: type.kind, value: quote, quote: quote,
                     page: number, region: region,
                     // A detector reports what it parsed; it ran no format rule,
                     // so `validated` is unknown rather than false (§11).
@@ -176,7 +215,7 @@ private func signals(for quote: String, line: Line, validated: Bool?) -> [Signal
 /// that a test catches it and quietly enough that one bad line does not cost the
 /// page its other findings.
 func finding(
-    label: String, value: String?, quote: String,
+    label: String, kind: Kind, value: String?, quote: String,
     page: Int, region: Region?,
     origin: Origin, validated: Bool?, conf: Double,
     signals: [Signal] = [],
@@ -189,7 +228,7 @@ func finding(
     let where_ = region.map { "\($0.x),\($0.y),\($0.width),\($0.height)" } ?? "-"
     return Finding(
         id: "\(origin.rawValue):\(page):\(label):\(quote):\(where_)",
-        label: label, value: value, conf: conf, quote: quote,
+        label: label, kind: kind, value: value, conf: conf, quote: quote,
         page: page, region: region, validated: validated,
         origin: origin, signals: signals, unresolved: false)
 }

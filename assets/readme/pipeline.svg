@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="420" viewBox="0 0 1240 420" role="img" aria-label="PigeonEye boundaries: the source PDF is read into form fields and OCR findings entirely on the machine; the consent gate is the only exit across the trust boundary">
+  <defs>
+    <pattern id="g2" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#35a8ff" stroke-opacity=".05" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#35a8ff"/>
+    </marker>
+    <marker id="arrowWarm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#ffb84d"/>
+    </marker>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1240" height="420" fill="#04060c"/>
+  <rect width="1240" height="420" fill="url(#g2)"/>
+
+  <!-- the machine -->
+  <rect x="20" y="52" width="1010" height="316" rx="10" fill="#070c17" stroke="#1e2b4c" stroke-width="1.5"/>
+  <text x="40" y="40" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12.5"
+        letter-spacing="3" fill="#35a8ff">THE MACHINE — ONE PROCESS · NO SERVER · NOTHING WRITTEN TO DISK</text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace">
+
+    <!-- source -->
+    <rect x="48" y="188" width="152" height="66" rx="6" fill="#0c1220" stroke="#2b3d63"/>
+    <text x="124" y="216" text-anchor="middle" font-size="14" fill="#ffffff">source.pdf</text>
+    <text x="124" y="236" text-anchor="middle" font-size="10.5" fill="#64748f">read-only · never copied</text>
+
+    <!-- branch up: form mode -->
+    <path d="M200 205 C 226 205, 226 130, 252 130" fill="none" stroke="#35a8ff" stroke-width="1.6" marker-end="url(#arrow)"/>
+    <rect x="258" y="98" width="392" height="66" rx="6" fill="#0c1220" stroke="#2b3d63"/>
+    <text x="278" y="126" font-size="14" fill="#ffffff">AcroForm widgets → 105 fields</text>
+    <text x="278" y="146" font-size="10.5" fill="#64748f">ground truth from the file · no OCR, no confidence</text>
+    <text x="672" y="136" font-size="10.5" fill="#2ee6a8">nothing to infer,</text>
+    <text x="672" y="150" font-size="10.5" fill="#2ee6a8">nothing to hallucinate</text>
+
+    <!-- branch down: document mode -->
+    <path d="M200 237 C 226 237, 226 312, 252 312" fill="none" stroke="#35a8ff" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+    <rect x="258" y="280" width="150" height="66" rx="6" fill="#0c1220" stroke="#2b3d63"/>
+    <text x="333" y="308" text-anchor="middle" font-size="14" fill="#ffffff">raster</text>
+    <text x="333" y="328" text-anchor="middle" font-size="10.5" fill="#64748f">150 dpi, in memory</text>
+
+    <path d="M408 313 H 452" fill="none" stroke="#35a8ff" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+    <rect x="458" y="280" width="150" height="66" rx="6" fill="#0c1220" stroke="#2b3d63"/>
+    <text x="533" y="308" text-anchor="middle" font-size="14" fill="#ffffff">OCR</text>
+    <text x="533" y="328" text-anchor="middle" font-size="10.5" fill="#64748f">text · confidence · bbox</text>
+
+    <path d="M608 313 H 652" fill="none" stroke="#35a8ff" stroke-width="1.6" marker-end="url(#arrow)"/>
+
+    <rect x="658" y="280" width="170" height="66" rx="6" fill="#0c1220" stroke="#2b3d63"/>
+    <text x="743" y="308" text-anchor="middle" font-size="14" fill="#ffffff">findings</text>
+    <text x="743" y="328" text-anchor="middle" font-size="10.5" fill="#64748f">value · quote · region</text>
+
+    <!-- gate -->
+    <path d="M828 313 C 856 313, 856 245, 884 245" fill="none" stroke="#ffb84d" stroke-width="1.6" marker-end="url(#arrowWarm)"/>
+    <g filter="url(#soft)">
+      <rect x="890" y="212" width="122" height="66" rx="6" fill="#140f06" stroke="#ffb84d" stroke-width="1.4"/>
+    </g>
+    <text x="951" y="240" text-anchor="middle" font-size="13" fill="#ffb84d">GATE</text>
+    <text x="951" y="260" text-anchor="middle" font-size="10.5" fill="#8a7550">the only exit</text>
+
+    <!-- trust boundary -->
+    <line x1="1058" y1="60" x2="1058" y2="360" stroke="#ff5f6e" stroke-width="1.6" stroke-dasharray="7 6"/>
+    <text x="1040" y="150" text-anchor="middle" font-size="11" letter-spacing="3" fill="#ff5f6e"
+          transform="rotate(-90 1040 150)">TRUST BOUNDARY</text>
+
+    <path d="M1012 245 H 1046" fill="none" stroke="#ffb84d" stroke-width="1.6" marker-end="url(#arrowWarm)"/>
+    <path d="M1070 245 H 1096" fill="none" stroke="#ffb84d" stroke-width="1.6" marker-end="url(#arrowWarm)"/>
+
+    <rect x="1102" y="212" width="118" height="66" rx="6" fill="#0c1220" stroke="#2b3d63" stroke-dasharray="4 4"/>
+    <text x="1161" y="240" text-anchor="middle" font-size="12.5" fill="#94a4c0">endpoint</text>
+    <text x="1161" y="259" text-anchor="middle" font-size="10" fill="#64748f">crops only</text>
+
+    <text x="40" y="388" font-size="11.5" fill="#64748f">The default path never reaches the dashed line.</text>
+    <text x="40" y="406" font-size="11.5" fill="#64748f">Local tier: approved crops only, asked per crop. Cloud tier: one grant, taken at import — and every escalation still shown.</text>
+  </g>
+</svg>

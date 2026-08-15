@@ -37,6 +37,34 @@ public struct Region: Codable, Sendable, Equatable {
     }
 }
 
+/// What a finding *is*, in the reader's words — the axis the findings index
+/// filters on.
+///
+/// Layer 0 because grouping is domain knowledge, not presentation: a view that
+/// decided `moneyAmount` and `Amount` belong together would be layer 1's
+/// vocabulary leaking into layer 4 (`coding-standards.md` §1). Both producers —
+/// format validators and Apple's data detectors — map onto this one axis, which
+/// is what lets a merged row exist at all.
+public enum Kind: String, Codable, Sendable, CaseIterable, Identifiable {
+    case date, money, rate, measure, window, identifier, contact, other
+
+    public var id: String { rawValue }
+
+    /// What the filter chip is called. Plural, because it names a group.
+    public var label: String {
+        switch self {
+        case .date: "Dates"
+        case .money: "Money"
+        case .rate: "Rates"
+        case .measure: "Measurements"
+        case .window: "Time windows"
+        case .identifier: "Reference numbers"
+        case .contact: "Contacts"
+        case .other: "Other"
+        }
+    }
+}
+
 /// A deterministic shape a value can be checked against.
 ///
 /// The rule lives here; the regex that implements it lives in `Tools`
@@ -61,6 +89,36 @@ public enum Format: String, Codable, Sendable, CaseIterable {
         case .amount: "Amount"
         case .formNumber: "Form no."
         case .rate: "Application rate"
+        }
+    }
+
+    public var kind: Kind {
+        switch self {
+        case .epaRegistration, .formNumber: .identifier
+        case .duration: .window
+        case .date: .date
+        case .amount: .money
+        case .rate: .rate
+        }
+    }
+
+    /// Words the line must carry before this shape may be *claimed*, or nil when
+    /// the shape stands on its own.
+    ///
+    /// Measured, not assumed: across `assets/`, `\b\d{3,5}-\d{1,5}\b` matched 78
+    /// distinct values and **9 were registration numbers**. The rest were phone
+    /// numbers (`1-800-424-9300`), IRS notice numbers (`2021-48`), OMB numbers
+    /// (`1545-0074`) and ZIP+4 (`20250-9410`) — every one of them rendered
+    /// *checked*, because they pass the shape. A shape this common is not a
+    /// claim; the words next to it are. Every genuine occurrence in the corpus
+    /// sits on a line that also says "EPA Reg. No." or "EPA Registration Number".
+    ///
+    /// This declines to *label* a value, it never discards one: the phone number
+    /// is still emitted by the detector that legitimately found it.
+    public var cue: [String]? {
+        switch self {
+        case .epaRegistration: ["epa", "reg"]
+        default: nil
         }
     }
 }
@@ -234,6 +292,11 @@ public struct Confidence: Sendable, Equatable {
 public struct Finding: Encodable, Sendable, Identifiable {
     public let id: String
     public let label: String
+    /// What this is, in the reader's words — the axis the findings index groups
+    /// and filters on. `label` names the shape a producer matched; `kind` names
+    /// what a reader was looking for, and two producers can agree on the second
+    /// while disagreeing on the first.
+    public let kind: Kind
     /// `nil` when present-but-unreadable.
     public let value: String?
     public let conf: Double
@@ -251,13 +314,38 @@ public struct Finding: Encodable, Sendable, Identifiable {
 
     /// `package`, so `Tools.finding(…)` stays the only way a `Finding` comes
     /// into existence and **I2**'s substring check cannot be walked around.
-    package init(id: String, label: String, value: String?, conf: Double, quote: String,
+    package init(id: String, label: String, kind: Kind, value: String?, conf: Double, quote: String,
                  page: Int, region: Region? = nil, validated: Bool? = nil,
                  origin: Origin, signals: [Signal] = [], unresolved: Bool = false) {
-        self.id = id; self.label = label; self.value = value; self.conf = conf
+        self.id = id; self.label = label; self.kind = kind; self.value = value; self.conf = conf
         self.quote = quote; self.page = page; self.region = region
         self.validated = validated; self.origin = origin; self.signals = signals
         self.unresolved = unresolved
+    }
+}
+
+/// A shape the findings can be written out in — the app's only write (F8).
+///
+/// Layer 0 because all three layers above need to name it: `Tools` writes the
+/// bytes, `Agent` adapts its `Document` to that call, and the UI puts the list
+/// in a menu. The order here is the order the menu shows.
+public enum ExportFormat: String, Codable, Sendable, CaseIterable, Identifiable {
+    case json, csv, text, pdf
+
+    public var id: String { rawValue }
+
+    /// The file extension, which is the raw value everywhere except `text` —
+    /// `.text` is not a file extension anyone recognises.
+    public var ext: String { self == .text ? "txt" : rawValue }
+
+    /// What the format is called on screen.
+    public var label: String {
+        switch self {
+        case .json: "JSON"
+        case .csv: "CSV (spreadsheet)"
+        case .text: "Plain text"
+        case .pdf: "PDF"
+        }
     }
 }
 

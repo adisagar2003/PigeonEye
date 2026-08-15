@@ -100,28 +100,34 @@ private func recognise(_ image: CGImage) async throws -> Page {
     }
 
     var data: [String: Int] = [:]
-    for match in doc.text.detectedData { data[typeName(match.match.details), default: 0] += 1 }
+    for match in doc.text.detectedData { data[detected(match.match.details).type, default: 0] += 1 }
 
     return Page(transcript: doc.text.transcript, lines: lines,
                 tables: doc.tables.count, lists: doc.lists.count, data: data)
 }
 
-/// `detectedData` grouped by semantic type, so the agent can see "page 31 has
-/// 12 measurements" and plan which pages to read. Density is the signal —
-/// `measurement` fires on 31 of 45 pages of an EPA label, so presence alone
-/// filters nothing.
-func typeName(_ details: DataDetector.Match.SemanticDetails) -> String {
+/// What a detector match is called, three ways: `type` for the page-density
+/// index the agent plans against, `label` for the screen, `kind` for the group
+/// the findings index files it under.
+///
+/// One switch rather than three, because a detector type that gains a name in
+/// one place and not the others is how `calendarEvent` reached the screen —
+/// `data` counts wanted the raw type and the panel took the same string. Density
+/// is the signal for the first job (`measurement` fires on 31 of 45 pages of an
+/// EPA label, so presence alone filters nothing) and it is a different job from
+/// naming a row.
+func detected(_ details: DataDetector.Match.SemanticDetails) -> (type: String, label: String, kind: Kind) {
     switch details {
-    case .link: "link"
-    case .emailAddress: "emailAddress"
-    case .phoneNumber: "phoneNumber"
-    case .postalAddress: "postalAddress"
-    case .calendarEvent: "calendarEvent"
-    case .moneyAmount: "moneyAmount"
-    case .flightNumber: "flightNumber"
-    case .shipmentTrackingNumber: "shipmentTrackingNumber"
-    case .measurement: "measurement"
-    case .paymentIdentifier: "paymentIdentifier"
-    @unknown default: "other"
+    case .link: ("link", "Link", .contact)
+    case .emailAddress: ("emailAddress", "Email", .contact)
+    case .phoneNumber: ("phoneNumber", "Phone", .contact)
+    case .postalAddress: ("postalAddress", "Address", .contact)
+    case .calendarEvent: ("calendarEvent", "Date", .date)
+    case .moneyAmount: ("moneyAmount", "Amount", .money)
+    case .flightNumber: ("flightNumber", "Flight no.", .other)
+    case .shipmentTrackingNumber: ("shipmentTrackingNumber", "Tracking no.", .other)
+    case .measurement: ("measurement", "Measurement", .measure)
+    case .paymentIdentifier: ("paymentIdentifier", "Payment ref.", .other)
+    @unknown default: ("other", "Other", .other)
     }
 }

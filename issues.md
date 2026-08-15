@@ -277,6 +277,49 @@ you pick. Don't guess the numbers and don't let the model pick them.
 
 ---
 
+## 3.4 The findings index, and the filters behind it
+
+**Type:** AFK · **Blocked by:** 3.1 · **Rows:** 2, 4
+
+Two halves of one problem, which is why they are one slice: what gets found, and
+how a reader reaches it. Neither is worth shipping without the other — a search
+box over 8,421 rows of noise finds noise faster.
+
+### What to build
+
+**The filters.** `Format.cue` — words a line must carry before a shape may be
+claimed under that name. `Format.kind` and `Kind` in layer 0, the axis both
+producers map onto. Merge on value + region with the validator winning, so one
+value in one place is one row. A `calendarEvent` with no date in it is not a
+date.
+
+**The index.** `Document.index` — one `IndexEntry` per distinct value, with
+every occurrence and the pages. `index(matching:kind:)` for the search box and
+the chips. A second tab on the findings panel: search, kind chips with counts,
+and rows that walk their occurrences on repeated clicks.
+
+### Acceptance criteria
+
+- [x] A phone number is never labelled a registration number, and is still found — **tested**
+- [x] One value in one place is one row whichever producers reached it — **tested**
+- [x] A detected date with no date in it is not filed under Dates — **tested**
+- [x] Search matches on the value *and* on what it is called, ignoring case and accents — **tested**
+- [x] A row that appears on N pages walks them and wraps — **tested**
+- [x] The index loses no finding: occurrence counts sum to `findings.count` — **tested**
+
+### Stress test
+
+| Case | Must happen |
+|---|---|
+| **IRS P17, 120 pages, 2,064 findings** | The index is usable. A per-page list is not an answer to "when is this due" and never was. |
+| **`1-800-424-9300`** | Not a registration number. It was, and it rendered *checked*, which is the worst way to be wrong. |
+| **A tax guide with no EPA anywhere in it** | Zero registration numbers. It found 42. |
+| The cue line itself is misread by OCR | The value is lost as a *registration number*, not lost — every producer that legitimately reads it still does. A recall cost paid on purpose against an 88% precision defect. |
+| A search that matches nothing | Says so, naming the query. Never a blank panel. |
+| Opening a second document | The query and the chip clear with everything else. |
+
+---
+
 # F4 · Explain it
 
 **The user can:** read one plain sentence naming the document, 3–5 summary
@@ -538,19 +581,23 @@ sent where. Consumer mode shows none of it.
 
 ## 8.1 Export
 
-**Type:** HITL (format) → AFK (build) · **Blocked by:** 4.1
+**Type:** HITL (format) → AFK (build) · **Blocked by:** 4.1 —
+**built ahead of it, on request.** See the tracker's **Current phase**: the
+export omits tier-1 prose because tier-1 prose does not exist yet, and 4.1 adds
+those five fields to `Tools.exported` when it lands.
 
-Answers open question 2.
+Answered the tracker's export-format question, which is now deleted.
 
 ### What to build
 
 Decide Markdown / CSV / JSON, then write findings to a path the user picks.
+**Decided: all four of JSON, CSV, plain text and PDF; Markdown dropped.**
 
 ### Acceptance criteria
 
-- [ ] User picks the path; no default location is written to
-- [ ] Findings only — no document bytes, no crops (**I8**, **I9**)
-- [ ] Format decision in the log; open question 2 deleted
+- [x] User picks the path; no default location is written to
+- [x] Findings only — no document bytes, no crops (**I8**, **I9**)
+- [x] Format decision in the log; the export-format question deleted
 
 ### Stress test
 

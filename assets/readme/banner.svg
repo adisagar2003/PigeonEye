@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="300" viewBox="0 0 1240 300" role="img" aria-label="PigeonEye — reads government documents on your machine">
+  <defs>
+    <radialGradient id="halo" cx="50%" cy="18%" r="70%">
+      <stop offset="0%" stop-color="#35a8ff" stop-opacity=".22"/>
+      <stop offset="60%" stop-color="#35a8ff" stop-opacity=".05"/>
+      <stop offset="100%" stop-color="#35a8ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#35a8ff" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#35a8ff" stop-opacity=".85"/>
+      <stop offset="100%" stop-color="#35a8ff" stop-opacity="0"/>
+    </linearGradient>
+    <pattern id="grid" width="34" height="34" patternUnits="userSpaceOnUse">
+      <path d="M34 0H0V34" fill="none" stroke="#35a8ff" stroke-opacity=".07" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1240" height="300" fill="#04060c"/>
+  <rect width="1240" height="300" fill="url(#grid)"/>
+  <rect width="1240" height="300" fill="url(#halo)"/>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" text-anchor="middle">
+    <text x="620" y="66" font-size="13" letter-spacing="7" fill="#35a8ff">LOCAL-FIRST DOCUMENT READER</text>
+
+    <g filter="url(#glow)">
+      <text x="620" y="150" font-size="66" font-weight="700" letter-spacing="14" fill="#ffffff">PIGEONEYE</text>
+    </g>
+
+    <rect x="420" y="176" width="400" height="1.5" fill="url(#rule)"/>
+  </g>
+
+  <text x="620" y="212" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+        font-size="21" fill="#94a4c0">Reads government documents on your machine.</text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14" text-anchor="middle">
+    <text x="300" y="262" fill="#7fd0ff">0 network calls</text>
+    <text x="620" y="262" fill="#7fd0ff">every value quoted</text>
+    <text x="940" y="262" fill="#7fd0ff">says where it&#39;s unsure</text>
+
+    <text x="300" y="282" fill="#64748f" font-size="11.5">in the local tier</text>
+    <text x="620" y="282" fill="#64748f" font-size="11.5">verbatim, or it does not exist</text>
+    <text x="940" y="282" fill="#64748f" font-size="11.5">a confident wrong date is worse</text>
+  </g>
+
+  <g fill="#1e2b4c">
+    <rect x="470" y="252" width="1" height="34"/>
+    <rect x="770" y="252" width="1" height="34"/>
+  </g>
+</svg>

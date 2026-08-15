@@ -15,3 +15,7 @@ assets/golden/*
 !assets/golden/fetch.sh
 !assets/golden/verify.py
 .build/
+
+# the Next.js scratch app — not part of the Swift product, and it holds
+# node_modules and a .env.local
+web/
