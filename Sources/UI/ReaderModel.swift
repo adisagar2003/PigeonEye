@@ -63,17 +63,30 @@ public final class ReaderModel {
     /// What the environment offers, before the tier has an opinion about it.
     private let configured: Gate.Config?
     private let transport: Gate.Transport
+    private let respond: LocalModel.Respond
+
+    /// The tier the reader picked at first run, and what it means here.
+    public private(set) var tier: OnboardingScreen.Tier = .openAI
+    /// Whether the on-device model can actually answer on this machine.
+    /// Re-asked on every `honour`, because macOS downloads and evicts these
+    /// assets on its own schedule.
+    public private(set) var localReady = false
+    /// Why the on-device tier cannot run, when it cannot. Rendered in the
+    /// panel, because "asking is off" without a reason is not a disclosure.
+    public private(set) var localBlocker: String?
 
     public init(
         read: @escaping @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
             = Agent.read,
         cloud: Gate.Config? = Gate.Config.fromEnvironment(ProcessInfo.processInfo.environment),
-        transport: @escaping Gate.Transport = Gate.defaultTransport
+        transport: @escaping Gate.Transport = Gate.defaultTransport,
+        respond: @escaping LocalModel.Respond = LocalModel.session
     ) {
         self.read = read
         self.configured = cloud
         self.cloud = cloud
         self.transport = transport
+        self.respond = respond
     }
 
     /// Honour the tier the reader picked at first run.
@@ -83,18 +96,31 @@ public final class ReaderModel {
     /// choosing the local option still produced a cloud-backed ask panel — the
     /// exact "fallback you have to discover" `project-overview.md` §3.1 rules
     /// out, and worse, because the reader had explicitly declined it.
-    public func honour(_ tier: OnboardingScreen.Tier) {
+    public func honour(_ tier: OnboardingScreen.Tier, localReady: Bool? = nil) {
+        self.tier = tier
         cloud = Self.askConfig(tier: tier, offered: configured)
+        self.localReady = localReady ?? (tier == .local && localModelAvailable())
+        localBlocker = tier == .local && !self.localReady
+            ? (localModelBlocker() ?? "The on-device model is not available on this Mac.")
+            : nil
     }
 
-    /// Pure, so the rule is testable without a window. There is no local
-    /// question tier yet — `Agent.localModelAvailable()` reports whether macOS
-    /// has the model, but nothing here opens a session with it — so `.local`
-    /// resolves to "cannot ask" rather than to a quieter endpoint.
+    /// Pure, so the rule is testable without a window. `.local` never resolves
+    /// to a cloud endpoint — it answers on this machine or it says why it
+    /// cannot.
     nonisolated public static func askConfig(tier: OnboardingScreen.Tier,
                                              offered: Gate.Config?) -> Gate.Config? {
         tier == .openAI ? offered : nil
     }
+
+    /// Whether the panel has anything to offer, by either tier.
+    public var canAsk: Bool { cloud != nil || localReady }
+
+    /// **Nothing leaves the machine on the local tier**, so there is nothing to
+    /// consent to. Asking permission to do something that does not happen is
+    /// the same theatre `project-overview.md` §4.1 rules out for crops — it
+    /// reads as evidence that something *is* being sent.
+    public var needsGrant: Bool { !localReady && cloud != nil && !askGranted }
 
     /// Identifies the newest request. Every `await` in this file is a point where
     /// an older, slower read can come back and clobber a newer one — a 45-page
@@ -150,8 +176,10 @@ public final class ReaderModel {
     /// by a check somewhere downstream.
     public func ask(_ question: String) async {
         let asked = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !asked.isEmpty, doc != nil, cloud != nil, !answering else { return }
-        guard askGranted else {
+        guard !asked.isEmpty, doc != nil, canAsk, !answering else { return }
+        // The grant covers egress, so the local tier does not need one — see
+        // `needsGrant`.
+        guard !needsGrant else {
             askPending = asked
             return
         }
@@ -173,16 +201,28 @@ public final class ReaderModel {
     public func cancelPending() { askPending = nil }
 
     private func send(_ question: String) async {
-        guard let doc, let cloud else { return }
+        guard let doc else { return }
         let id = requestID
         let asked = page
 
         turns.append(Turn(role: .user, text: question))
         answering = true
 
-        let answer = await answered(doc, page: asked, question: question,
+        // The on-device tier wins when it is available. That ordering is the
+        // product: `project-overview.md` §3 promises that on a machine with a
+        // local reasoning model nothing leaves at all, and a preference the
+        // code consults second is a preference the code does not hold.
+        let answer: Answer
+        if localReady {
+            answer = await answeredHere(doc, page: asked, question: question, respond: respond)
+        } else if let cloud {
+            answer = await answered(doc, page: asked, question: question,
                                     history: turns.dropLast(), config: cloud,
                                     transport: transport)
+        } else {
+            answering = false
+            return
+        }
 
         // The same generation check as every other await in this file: an answer
         // about the document that *was* open must not land on the one that is.

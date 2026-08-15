@@ -350,6 +350,20 @@ public enum Limits {
     public static let askQuoteChars = 300
     public static let askQuestionChars = 2_000
 
+    /// The budget for a question put to the **on-device** model.
+    ///
+    /// Apple's window is 4096 tokens for prompt *and* answer, fixed and not
+    /// configurable (`architecture.md` §3). This spends a little over half of
+    /// it on the question so there is room left for a reply — a prompt that
+    /// fills the window produces a truncated answer, which reads as the model
+    /// trailing off rather than as the limit it is.
+    ///
+    /// One EPA page measures ~530 tokens, so a page, its evidence and a
+    /// question fit comfortably. That is the measurement that makes an
+    /// on-device tier possible for this feature and not for whole-document
+    /// explanation.
+    public static let localPromptTokens = 2_400
+
     /// How many earlier turns travel with a question. Enough to follow up
     /// ("and the one below it?"), bounded so a long conversation cannot grow
     /// the payload without limit.

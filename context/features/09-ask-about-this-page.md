@@ -40,6 +40,12 @@ the page, its size and the host. Neither line contains a word of the document.
 That second question is the feature. The first one a transcript could have
 answered.
 
+**Then switch the tier to "On this Mac" and ask the first question again.** The
+same answer arrives, the consent card never appears, and the inspector still
+says *Left this machine: nothing* — because this time it did not. That is
+`project-overview.md` §3's headline claim, on screen, with the feature still
+working rather than switched off.
+
 ---
 
 ## 2. Settled before writing this
@@ -48,7 +54,8 @@ answered.
 |---|---|---|
 | Grounded on the page, or on the document? | **The page.** Sending all 45 pages on every question makes "this page's text is sent" a sentence the app cannot mean | yours |
 | May the model see pages it was not given? | **Yes, through one tool**, bounded. A reader who already knew which page to turn to would not be asking | yours |
-| How is consent taken? | **Once per document**, in the panel, before the first question — the same shape as the import-time grant | yours, per `project-overview.md` §4.1 |
+| How is consent taken? | **Once per document**, in the panel, before the first question — the same shape as the import-time grant. On the on-device tier, **not at all**, because nothing leaves | yours, per `project-overview.md` §4.1 |
+| Is there an on-device tier? | **Yes, and it is preferred when available.** Half the product's pitch was a disabled button without it | yours, from review |
 | Does an answer become a `Finding`? | **No.** See §5 | mine |
 | Which endpoint? | Any OpenAI-compatible `/v1`, base URL from the environment. Cloud for the demo | `progress-tracker.md`, "Agent is model-agnostic" |
 | Where does the loop live? | Layer 4 — and not by preference. See §3.2 | `coding-standards.md` §1 |
@@ -61,13 +68,16 @@ answered.
 
 | Layer | Target | Holds |
 |---|---|---|
-| 0 | `Contracts` | `Turn`, `Call` (with `Call.requestedPage`), `Limits.askHops` / `askPageChars` / `askHistory` / `maxPromptTokens` |
+| 0 | `Contracts` | `Turn`, `Call` (with `Call.requestedPage`), `Limits.askHops` / `askPages` / `askPageChars` / `askHistory` / `askQuoteChars` / `askQuestionChars` / `maxPromptTokens` / `localPromptTokens` |
+| 2 | `Agent` | `Ask.swift` — how a question is grounded on a page, shared by both tiers, pure. `LocalModel.swift` — the on-device tier and its availability |
 | 3 | `Gate` | `Gate.Config`, `Gate.Transport`, `Gate.Reply`, `Gate.answer(…)` — one POST, one tool offered, nothing else |
-| 4 | `UI` | `answered(…)` — the hop loop; `ReaderModel.turns` / `askGranted` / `askPending` / `sends`; the `askBlock` panel and the consent card |
+| 4 | `UI` | `answered(…)` — the cloud hop loop; `answeredHere(…)` — the local adapter; `ReaderModel` state; the `askBlock` panel and the consent card |
 
-There is deliberately **no layer 2 file**. Nothing about this feature belongs to
-the read loop, and adding a seam in `Agent` for it would have been scaffolding
-for a caller that does not exist.
+**The prompt builders are in layer 2 because there are two callers and one
+fact.** Both tiers must ground a question the same way — same page text, same
+evidence, same rule about not inventing a date. Two copies would drift, and the
+copy that drifted would be the one that made something up
+(`coding-standards.md` §1.1).
 
 ### 3.2 Why the loop is in layer 4, which looks wrong until it doesn't
 
@@ -121,6 +131,57 @@ re-deriving what the machine already knows, and gives it a quote to cite.
 
 ---
 
+### 3.4a The on-device tier, and why *this* feature is where it becomes possible
+
+Apple's window is **4096 tokens for prompt and answer combined**, fixed
+(`architecture.md` §3). That number is the reason whole-document explanation
+needs chunking and map-reduce, and it is why F4 treats Foundation Models as
+optional rather than foundational.
+
+**A single-page question is the one workload it comfortably fits.** Measured in
+`architecture.md` §3: one OCR'd EPA page is ~530 tokens. Instructions are ~250.
+A question and its answer fit in what is left, with room to spare —
+`Limits.localPromptTokens` spends 2,400 of the window on the prompt so the reply
+is not truncated into looking like the model trailing off.
+
+So the constraint that makes F4 hard does not bind here. This feature is where
+*"on a machine with a local reasoning model, nothing leaves — full stop"*
+(`project-overview.md` §3) stops being an intention and becomes code.
+
+| | Cloud tier | On-device tier |
+|---|---|---|
+| Where | `Sources/Gate/` + the hop loop in layer 4 | `Sources/Agent/LocalModel.swift`, in-process |
+| Sees | the open page, plus pages it fetches | **the open page only** |
+| Fetching other pages | `read_page`, bounded | none — the window that makes one page possible makes several impossible |
+| Consent | granted once per document | **none, because nothing leaves** |
+| Inspector ledger | one line per page sent | **empty, by construction** |
+
+The instructions differ by exactly one paragraph
+(`Document.askInstructions(canFetchPages:)`): the on-device model is told it can
+see only this page and should name the page that likely carries the answer,
+rather than being offered a tool it cannot afford to call. Everything else —
+the page, the evidence, the rule about never inventing a date — is one shared
+builder in layer 2, because two copies of *how a question is grounded* would
+drift, and the copy that drifted would be the one that made something up.
+
+**Inference in-process is not egress.** `scripts/layers.sh` keeps
+`import FoundationModels` inside `Sources/Agent/`, and that file opens no
+socket. The distinction is the whole reason the tier is worth having.
+
+**Degradation, and what gives way first.** A page can carry forty recognised
+values whose quotes are verbatim OCR lines, and that block can be larger than
+the page it describes — while the page itself is already capped at
+`askPageChars`. So the evidence is dropped before the page is: the model can
+re-derive a value from the text underneath, but it cannot re-derive the text.
+`LocalModel.Failure.tooLong` remains as the backstop after that.
+
+**Not testable end to end on this machine.** `SystemLanguageModel.default.availability`
+returns `unavailable(appleIntelligenceNotEnabled)` here — the hardware is
+eligible, the switch is off (`progress-tracker.md`). Every test injects
+`LocalModel.Respond`, so the plumbing, the budget and the tier preference are
+all covered; **the quality of on-device answers is unmeasured** and is recorded
+as such in §10.
+
 ### 3.5 The tier is what decides whether asking exists at all
 
 `readingTier` is picked at first run and stored. Until review caught it, **only
@@ -139,12 +200,19 @@ pure rule behind it so it can be tested without a window:
 |---|---|---|
 | `.openAI`, key present | the config | the host, above the field |
 | `.openAI`, no key | `nil` | "No key is set… export `OPENAI_KEY`" |
-| `.local` | **`nil`, always** | "You chose On this Mac, so nothing leaves — and asking needs a model that runs here, which is not built yet" |
+| `.local`, model ready | **`nil`, always** — it answers here instead | "answered on this Mac — nothing leaves, and there is nothing to agree to" |
+| `.local`, Apple Intelligence off | `nil`, and nothing local either | the reason, from `localModelBlocker()` — a switch in System Settings, a download in progress, or a Mac that cannot |
 
-`.local` resolves to *cannot ask* rather than to a quieter endpoint, because
-there is no on-device question tier: `Agent.localModelAvailable()` reports
-whether macOS has the model, but nothing opens a session with it. Saying so is
-the honest answer; silently using the cloud is not.
+`.local` **never** resolves to a cloud endpoint. It answers on this machine or
+it says why it cannot, and the three reasons are distinguished because they need
+different things from the reader: a switch in System Settings, patience while
+macOS finishes a download, or a Mac that will never run it. Telling someone with
+an eligible Mac to buy a new one, or someone with an ineligible one to go
+hunting in Settings, are both worse than saying nothing.
+
+And when the on-device model *is* available it **wins** — `ReaderModel.send`
+tries it before the endpoint, even with a key in the environment. A preference
+the code consults second is a preference the code does not hold.
 
 The onboarding copy was corrected in the same diff — two cards claimed *"this
 build has no network code in it at all"* and *"this build sends nothing yet"*,
@@ -290,6 +358,13 @@ throughout — **no test in this feature touches the network**.
 | 16 | `one_over_eager_reply_cannot_send_the_whole_document` | §4.1, `askPages` |
 | 17 | `an_offline_machine_does_not_report_text_as_having_left` | §4.3 |
 | 18 | `a_rejected_request_still_reports_that_the_text_left` | §4.3, the other direction |
+| 19 | `the_local_tier_answers_without_touching_the_transport` | §3.4a — the pitch, as a test |
+| 20 | `the_local_tier_asks_for_no_grant` | nothing leaves, so nothing to consent to |
+| 21 | `the_local_tier_is_preferred_over_a_configured_endpoint` | local wins when it is there |
+| 22 | `a_chosen_but_unavailable_local_tier_says_why_and_sends_nothing` | no silent fallback to the declined tier |
+| 23 | `evidence_gives_way_before_the_page_does` | **I13** on the 4096-token window |
+| 24 | `an_ordinary_page_fits_the_on_device_window` | the guard is not merely an off switch |
+| 25 | `a_local_failure_says_nothing_left_the_machine` | the assumption a reader would otherwise make |
 
 **The F1 lesson applied.** A green test proves nothing until it has been seen
 red. Both invariant guards were mutated and the suite re-run:
@@ -301,6 +376,8 @@ red. Both invariant guards were mutated and the suite re-run:
 | `askConfig` returns `offered` whatever the tier | #12 and #13 — the local tier sent |
 | Remove the `askPages` guard | #16 — one reply sent all 10 pages |
 | `sent(_:)` always returns `.yes` | #17 — an offline machine reported text as having left |
+| Cloud path taken even when the local model is ready | #19 and #21 — the transport was reached |
+| Never drop evidence when over the on-device window | #23 — `tooLong` thrown on a page that should fit |
 
 All reverted. This is the check `progress-tracker.md`'s F1 review says a stress
 table without tests is missing — and the last three mutations exist because the
@@ -320,7 +397,10 @@ same lesson arriving a second time.
 - [x] A refused key, a 429 or an unparseable reply leaves the document untouched (**I6**)
 - [x] At most `Limits.askPages` pages leave to answer one question, however many the model asks for
 - [x] The token budget is asserted against the bytes that go out, before they go (**I13**) — and refuses rather than trims-and-posts
-- [x] The tier picked at first run decides whether asking exists; `.local` sends nothing
+- [x] The tier picked at first run decides how a question is answered; `.local` answers on this Mac and sends nothing
+- [x] The on-device tier is preferred over a configured endpoint when it is available
+- [x] `.local` with the model unavailable says which of the three reasons it is, and does not fall back to the cloud
+- [x] The on-device prompt is asserted against the 4096-token window, dropping evidence before the page (**I13**)
 - [x] The ledger records a page only once the wire has carried it, and says so when that is uncertain
 - [x] No `Finding` is minted from an answer, so **I2** is untouched
 - [x] The inspector's record names page, size and host — never words, filename or key

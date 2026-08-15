@@ -38,6 +38,22 @@ chat anywhere, and the only "ask" in it was F5's crop consent.
    empty. What 5.2 still owes is the *crop* egress and the approved-set
    assertion; the config, transport seam and failure handling are built.
 
+**The on-device tier is real, and this is the feature where it could be.**
+Apple's 4096-token window is what makes whole-document explanation need
+chunking, and it is why F4 treats Foundation Models as optional. But one OCR'd
+EPA page measures ~530 tokens — a single-page question, its instructions and its
+answer fit inside the window unchunked. So `project-overview.md` §3's *"on a
+machine with a local reasoning model, nothing leaves — full stop"* is now code
+rather than an intention: pick "On this Mac" and the question is answered
+in-process, with no consent card (nothing leaves, so there is nothing to agree
+to) and an inspector ledger that is empty by construction.
+
+**Quality of on-device answers is unmeasured.** `availability` on this machine is
+`unavailable(appleIntelligenceNotEnabled)` — eligible hardware, switch off — so
+every test injects `LocalModel.Respond`. The plumbing, the budget and the tier
+preference are covered; how good the answers are is not, and 4.3 is still the row
+that settles it.
+
 **What it does not do**, deliberately: no `Finding` is ever minted from a chat
 answer. `Finding`'s initialiser is `package` and `Tools.finding(...)` is the one
 construction point that checks the quote against the transcript (**I2**). Chat
@@ -649,6 +665,10 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **`Gate` depends on `Contracts` alone, not on `Tools`** — an egress that can reach `Tools` can read a file, and the single thing this boundary promises is that it cannot. The hop loop therefore lives in layer 4, which is the only layer that sees both the `Document` and the egress | mine |
 | **The header chip and the inspector's "left this machine" line are now conditional, not constants** — both were true by construction while no Gate layer existed. A claim that is true of the reading path and quietly false of the asking path is exactly the fallback-you-have-to-discover that `project-overview.md` §3.1 rules out | consequence of F9 |
 | **`ShortcutsSheet.opensList` takes `typing:`** — the bare-`?` monitor sees every keystroke in the app, so the moment there was a field to type a question into, "what does ? mean" opened the shortcuts sheet and ate the character. A shortcut that steals characters out of a field is worse than no shortcut | consequence of F9 |
+| **The on-device tier answers single-page questions, and is preferred over a configured endpoint when available** — 4096 tokens is the constraint that makes F4 need chunking, but one page is ~530 tokens, so this is the one workload it fits unchunked. Without it, picking "On this Mac" produced a switched-off panel: the honest option was also the useless one | yours, from review |
+| **No consent card on the on-device tier** — nothing leaves, so asking permission is the same theatre §4.1 rules out for crops. A prompt for something that does not happen reads as evidence that it does | mine |
+| **Evidence gives way before the page does when the on-device window is tight** — forty quotes are verbatim OCR lines and can outweigh the page they describe, while the page is already capped. The model can re-derive a value from the text; it cannot re-derive the text | mine |
+| **`Document.askInstructions` / `askOpening` live in layer 2, shared by both tiers** — two callers, one fact. Two copies of "how a question is grounded" would drift, and the copy that drifted would be the one that invented a date | mine |
 | **The tier picked at first run decides whether asking exists at all** — `readingTier` was a stored preference only `OnboardingScreen` read, so choosing "On this Mac" still produced a cloud-backed ask panel. That is worse than an undisclosed fallback: the reader had *explicitly declined* it. `.local` resolves to "cannot ask", not to a quieter endpoint, because no on-device question tier is built | review of PR #22 |
 | **`Limits.askPages` bounds pages, because `askHops` only bounds rounds** — one reply may legally carry a hundred `read_page` calls, so an over-eager response sent a whole document from inside a loop that called itself bounded. The budget is charged per *new* page, and calls past it get an ordinary tool result rather than a refusal, so a legitimate two-page question still works | review of PR #22 |
 | **I13 is an assertion, not an effort** — the trim loop drops the oldest turns and stops at one, which cannot help when the newest turn is itself over budget, so an oversized payload was trimmed as far as possible and posted anyway. `Gate.Failure.promptTooLarge` now refuses before the request is built, behind caps on the two unbounded inputs (a pasted question, and quotes that are verbatim OCR lines) | review of PR #22 |

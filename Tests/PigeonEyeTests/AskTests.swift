@@ -64,6 +64,19 @@ private func document(pages: Int = 3, findings: [Finding] = []) -> Document {
         failedPages: [], fields: [], findings: findings, log: [])
 }
 
+/// A box for "was this closure called?", because the closure is `@Sendable` and
+/// a captured `var` is not.
+private final class Reached: @unchecked Sendable {
+    private(set) var value = false
+    func mark() { value = true }
+}
+
+/// Keeps whatever a `@Sendable` closure was handed, so a test can inspect it.
+private final class Captured: @unchecked Sendable {
+    private(set) var value: String?
+    func set(_ text: String) { value = text }
+}
+
 /// Records every request the code tried to make, and answers from a script.
 private final class Recorder: @unchecked Sendable {
     private(set) var sent: [URLRequest] = []
@@ -363,7 +376,139 @@ private final class Recorder: @unchecked Sendable {
             "the server answered, so the page did leave — saying otherwise under-reports egress")
 }
 
-// MARK: - 10 · The `?` monitor, which now has a text field to share the app with
+// MARK: - 10 · The on-device tier, which is half the product's pitch
+
+/// `project-overview.md` §3: *"On a machine with a local reasoning model,
+/// nothing leaves — full stop."* The test for that sentence is that the
+/// transport is never constructed, not that a comment says so.
+@MainActor
+@Test func the_local_tier_answers_without_touching_the_transport() async throws {
+    let tap = Recorder([says("should never be reached")])
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: tap.transport,
+                            respond: { _, _ in "The restricted-entry interval is 12 hours." })
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.honour(.local, localReady: true)
+
+    await model.ask("what is the REI?")
+
+    #expect(tap.sent.isEmpty, "the local tier reached the network")
+    #expect(model.turns.last?.text.contains("12 hours") == true)
+    #expect(model.sends.isEmpty, "the inspector claims something left on a local answer")
+}
+
+/// **Nothing leaves, so there is nothing to consent to.** A card asking
+/// permission for something that does not happen is the same theatre §4.1 rules
+/// out for crops — it reads as evidence that something *is* being sent.
+@MainActor
+@Test func the_local_tier_asks_for_no_grant() async throws {
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: { _ in
+                                Issue.record("the transport was reached"); return (Data(), okResponse)
+                            },
+                            respond: { _, _ in "answered here" })
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.honour(.local, localReady: true)
+
+    #expect(model.needsGrant == false)
+    await model.ask("no consent card should appear")
+    #expect(model.askPending == nil, "the question was held for a grant that is not needed")
+    #expect(model.turns.last?.text == "answered here")
+}
+
+/// The on-device model wins when it is there. A preference the code consults
+/// second is a preference the code does not hold.
+@MainActor
+@Test func the_local_tier_is_preferred_over_a_configured_endpoint() async throws {
+    let tap = Recorder([says("cloud")])
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: tap.transport,
+                            respond: { _, _ in "local" })
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.honour(.local, localReady: true)
+    model.grantAsk()
+
+    await model.ask("which tier?")
+    #expect(model.turns.last?.text == "local")
+    #expect(tap.sent.isEmpty)
+}
+
+/// The local tier can be *chosen* and still be unavailable — Apple Intelligence
+/// is a System Settings toggle, and on this machine it is off. The panel has to
+/// say which of the three reasons it is, because one is fixable in a minute and
+/// one is not fixable at all.
+@MainActor
+@Test func a_chosen_but_unavailable_local_tier_says_why_and_sends_nothing() async throws {
+    let tap = Recorder([says("cloud")])
+    let model = ReaderModel(read: { _, _ in document() },
+                            cloud: try config(), transport: tap.transport,
+                            respond: { _, _ in "local" })
+    await model.open(URL(fileURLWithPath: "/tmp/pigeoneye-ask.pdf"))
+    model.honour(.local, localReady: false)
+
+    #expect(model.canAsk == false, "an unavailable local tier still offered a field")
+    #expect(model.localBlocker != nil, "asking is off and the reader is not told why")
+    await model.ask("anything?")
+    #expect(tap.sent.isEmpty, "it quietly fell back to the endpoint the reader declined")
+}
+
+/// **I13 on the tier the invariant was written for.** Apple's window is 4096
+/// tokens for prompt *and* answer, and it fails as a thrown framework error at
+/// the far end.
+///
+/// The page is already capped at `askPageChars`, so the block that can actually
+/// overflow is the evidence: forty recognised values whose quotes are verbatim
+/// OCR lines can be larger than the page they describe. Evidence gives way
+/// first, because the model can re-derive it from the text underneath — the
+/// page it cannot.
+@Test func evidence_gives_way_before_the_page_does() async throws {
+    let long = String(repeating: "quotation ", count: 400)   // ~4,000 chars
+    let page = Page(transcript: long, lines: [], tables: 0, lists: 0, data: [:])
+    let bulky = (0..<40).compactMap {
+        finding(label: "value \($0)", value: "v", quote: long, page: 1,
+                region: Region(x: 0, y: 0, width: 1, height: 0.1),
+                origin: .validator, validated: true, conf: 0.7, in: long)
+    }
+    let doc = Document(
+        url: URL(fileURLWithPath: "/tmp/pigeoneye-bulky.pdf"), kind: .pdf,
+        pageCount: 1, pagesRead: 1, capped: false, pages: [page],
+        failedPages: [], fields: [], findings: bulky, log: [])
+
+    #expect(bulky.count == 40, "the fixture did not build the evidence it is testing")
+
+    let seen = Captured()
+    _ = try await answeredLocally(doc, page: 1, question: "what is this?",
+                                  respond: { _, prompt in seen.set(prompt); return "answered" })
+
+    let prompt = try #require(seen.value)
+    #expect(Gate.estimatedTokens(prompt) <= Limits.localPromptTokens,
+            "an over-window prompt was handed to the on-device model")
+    #expect(prompt.contains("quotation"), "the page itself was dropped — that costs the answer")
+    #expect(!prompt.contains("value 39"), "the evidence block was kept and the window blown")
+}
+
+/// A page that fits must actually go, or the guard above is just an off switch.
+@Test func an_ordinary_page_fits_the_on_device_window() async throws {
+    let text = try await answeredLocally(document(), page: 1, question: "what is this?",
+                                         respond: { instructions, prompt in
+        #expect(instructions.contains("only the page below"),
+                "the on-device tier was told about a tool it cannot afford to use")
+        #expect(prompt.contains("Marker1"))
+        return "It is page 1."
+    })
+    #expect(text == "It is page 1.")
+}
+
+/// The failure has to name itself, and has to say the thing a reader will
+/// otherwise assume did happen.
+@Test func a_local_failure_says_nothing_left_the_machine() async throws {
+    let answer = await answeredHere(document(), page: 1, question: "?",
+                                    respond: { _, _ in throw LocalModel.Failure.empty })
+    #expect(answer.sends.isEmpty)
+    #expect(answer.note?.contains("Nothing left this machine") == true)
+}
+
+// MARK: - 11 · The `?` monitor, which now has a text field to share the app with
 
 /// The bare-`?` monitor sees every keystroke in the app, including the ones
 /// meant for the ask field. Before this, typing "what does ? mean" opened the

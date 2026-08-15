@@ -87,7 +87,7 @@ public struct ReaderScreen: View {
                 // own focus.
                 if event.modifierFlags.intersection([.command, .control, .option, .shift]) == [.command],
                    event.charactersIgnoringModifiers == "k",
-                   model.doc != nil, model.cloud != nil {
+                   model.doc != nil, model.canAsk {
                     asking = true
                     return nil
                 }
@@ -119,8 +119,9 @@ public struct ReaderScreen: View {
                 // not, so the chip says which half is which. A claim that is
                 // true of one path and quietly false of another is the "fallback
                 // you have to discover" `project-overview.md` §3.1 rules out.
-                Text(model.askGranted ? "Reads locally · asked \(model.cloud?.host ?? "")"
-                                      : "Reads locally")
+                Text(model.askGranted && !model.localReady
+                     ? "Reads locally · asked \(model.cloud?.host ?? "")"
+                     : "Reads locally")
                     .font(.heading(12, .semibold)).tracking(1.1).textCase(.uppercase)
                     .foregroundStyle(Ink.accent300)
             }
@@ -467,9 +468,15 @@ public struct ReaderScreen: View {
                 .foregroundStyle(Ink.accent700)
                 .padding(.bottom, 2)
 
-            if let cloud = model.cloud {
-                Text("answers come from \(cloud.host) — this page's text is sent, nothing else")
-                    .font(.body(11.5)).foregroundStyle(Ink.neutral600)
+            if model.canAsk {
+                // Which tier is answering, before a word of its output. On the
+                // local tier this is the product's headline claim being true on
+                // screen rather than in a README.
+                Text(model.localReady
+                     ? "answered on this Mac — nothing leaves, and there is nothing to agree to"
+                     : "answers come from \(model.cloud?.host ?? "") — this page's text is sent, nothing else")
+                    .font(.body(11.5))
+                    .foregroundStyle(model.localReady ? Ink.accent700 : Ink.neutral600)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.bottom, 10)
 
@@ -487,19 +494,18 @@ public struct ReaderScreen: View {
                     .padding(.bottom, 10)
                 }
 
-                if let held = model.askPending {
+                if let held = model.askPending, let cloud = model.cloud {
                     consent(cloud, question: held)
                 } else {
                     askField
                 }
             } else {
-                // A box that cannot send is worse than no box. Say what is
+                // A box that cannot answer is worse than no box. Say what is
                 // missing rather than failing on the first press — and say
-                // which of the two reasons it is, because one is the reader's
-                // own choice and telling them to set a key would be wrong.
-                Text(tier == .openAI
-                     ? "No key is set, so nothing can be asked. Export OPENAI_KEY and reopen."
-                     : "You chose On this Mac, so nothing leaves — and asking needs a model that runs here, which is not built yet.")
+                // which reason it is, because one is a key the reader can set,
+                // one is a switch in System Settings, and one is the machine.
+                Text(model.localBlocker
+                     ?? "No key is set, so nothing can be asked. Export OPENAI_KEY and reopen.")
                     .font(.body(11.5)).foregroundStyle(Ink.neutral600)
                     .fixedSize(horizontal: false, vertical: true)
             }

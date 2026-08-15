@@ -44,7 +44,7 @@ public func answered(
     transport: @escaping Gate.Transport = Gate.defaultTransport
 ) async -> Answer {
     var turns = Array(history.suffix(Limits.askHistory))
-    turns.append(Turn(role: .user, text: opening(doc, page: page, question: question)))
+    turns.append(Turn(role: .user, text: doc.askOpening(page: page, question: question)))
 
     var used = [page]
     var sends: [String] = []
@@ -56,7 +56,7 @@ public func answered(
     /// machine or a refused-before-sending prompt still produced a
     /// "page N text → host" line. Claiming text left when it did not is the
     /// dangerous direction for this app to be wrong in.
-    var loaded = [(page: page, chars: pageText(doc, page)?.count ?? 0)]
+    var loaded = [(page: page, chars: doc.askPageText(page)?.count ?? 0)]
 
     // Bounded (**I10**). The last pass withdraws the tool rather than
     // abandoning the turn, so the bound costs a hop, never the answer.
@@ -64,7 +64,7 @@ public func answered(
         let last = hop == Limits.askHops
         let reply: Gate.Reply
         do {
-            reply = try await Gate.answer(turns, system: instructions(doc),
+            reply = try await Gate.answer(turns, system: doc.askInstructions(canFetchPages: true),
                                           offerTool: !last, config: config, transport: transport)
         } catch {
             sends.append(contentsOf: ledger(loaded, to: config.host, sent: sent(error)))
@@ -101,7 +101,7 @@ public func answered(
             }
 
             let wanted = call.requestedPage
-            let text = wanted.flatMap { pageText(doc, $0) }
+            let text = wanted.flatMap { doc.askPageText($0) }
             if let wanted, let text {
                 // Only count a page as used once, however often it is asked for
                 // — and only charge the budget for one that is actually new.
@@ -134,73 +134,6 @@ private let cutOff = """
     Try asking about a specific page.
     """
 
-/// What the model is for, and the two things it may not do.
-///
-/// The wording is the one this repo already agreed twice — `spikes/spike_fm.swift`
-/// and `eval/openai_run.py` carry it byte-for-byte, and their own comment says
-/// to change all of them together. Extended here with the one rule a
-/// page-grounded conversation adds: name the page.
-private func instructions(_ doc: Document) -> String {
-    """
-    You explain official government documents to someone who must comply with them \
-    and has no specialist training. They are looking at one page and asking about it.
-
-    Use only what the document says. If a detail is not in the text, say it is not stated. \
-    Never invent a date, a number, a rate or a name. Quote or omit.
-
-    Name the page every claim came from. If the answer is not on the page in front of \
-    them, use \(Call.readPage) to look at another page rather than guessing — this \
-    document has \(doc.pagesRead) readable pages.
-
-    Answer in two or three sentences unless more is genuinely needed. Do not give legal, \
-    tax or compliance advice; explain what the document says and stop there.
-    """
-}
-
-/// The question, with the page under it and the values already recognised on
-/// that page.
-///
-/// Those values are the one part of the payload carrying provenance — each has
-/// been checked against the transcript at the single construction point that
-/// enforces **I2**. Sending them saves the model re-deriving what the machine
-/// already knows, and gives it the quote to cite.
-private func opening(_ doc: Document, page: Int, question: String) -> String {
-    var lines = ["The reader is looking at page \(page). \(doc.pagesReadLine)."]
-
-    if let text = pageText(doc, page), !text.isEmpty {
-        lines.append("")
-        lines.append("--- page \(page) ---")
-        lines.append(text)
-        lines.append("--- end of page \(page) ---")
-    } else {
-        lines.append("")
-        lines.append("Page \(page) has no readable text — it may have failed to render.")
-    }
-
-    let onPage = doc.findings.filter { $0.page == page }
-    if !onPage.isEmpty {
-        lines.append("")
-        lines.append("Values already recognised on this page, with the words they came from:")
-        // Both bounds matter. A quote is a verbatim OCR line and a page can
-        // carry many of them, so 40 unbounded quotes is an unbounded payload —
-        // and an unbounded payload is what I13 is asserted against downstream.
-        lines.append(contentsOf: onPage.prefix(40).map {
-            "  \($0.label): \($0.value ?? "—") — \"\($0.quote.prefix(Limits.askQuoteChars))\""
-        })
-    }
-
-    lines.append("")
-    lines.append("Their question: \(question.prefix(Limits.askQuestionChars))")
-    return lines.joined(separator: "\n")
-}
-
-/// One page's text, capped. Nil when the page is outside what was read — which
-/// is what makes a bad `read_page` call answerable rather than fatal.
-private func pageText(_ doc: Document, _ number: Int) -> String? {
-    guard number >= 1, number <= doc.pages.count else { return nil }
-    return String(doc.pages[number - 1].transcript.prefix(Limits.askPageChars))
-}
-
 /// Whether the bytes reached the far end.
 private enum Sent { case yes, no, unknown }
 
@@ -232,4 +165,35 @@ private func why(_ error: Error) -> String {
     (error as? LocalizedError)?.errorDescription
         ?? (error as? URLError).map { _ in "the machine could not reach the API" }
         ?? "the request did not complete"
+}
+
+/// Answer on this machine, in the same `Answer` shape the cloud path returns.
+///
+/// Thin on purpose — the work is `Agent.answeredLocally`, which is where it
+/// belongs, because on-device inference is not egress and layer 2 is allowed to
+/// do it. This adapter exists so `ReaderModel` has one return type to render
+/// whichever tier answered, rather than a branch in the view.
+///
+/// **`sends` is empty and always will be.** That is the whole point of the
+/// tier: the inspector shows "Left this machine: nothing" and it is true by
+/// construction rather than by a check.
+public func answeredHere(
+    _ doc: Document,
+    page: Int,
+    question: String,
+    respond: @escaping LocalModel.Respond = LocalModel.session
+) async -> Answer {
+    do {
+        let text = try await answeredLocally(doc, page: page, question: question, respond: respond)
+        return Answer(text: text, pagesUsed: [page], note: nil, sends: [])
+    } catch {
+        let why = (error as? LocalizedError)?.errorDescription ?? "the on-device model did not answer"
+        return Answer(
+            text: "That question could not be answered — \(why).",
+            pagesUsed: [page],
+            // Said out loud, because the alternative a reader will assume is
+            // that it quietly asked someone else.
+            note: "Nothing left this machine. The document on screen is unchanged.",
+            sends: [])
+    }
 }
