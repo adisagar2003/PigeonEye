@@ -19,5 +19,11 @@ struct PigeonEyeApp: App {
         }
         .defaultSize(width: 1320, height: 860)
         .windowResizability(.contentMinSize)
+
+        // ⌘, and the app menu. The tier used to be pickable only on the last
+        // card of the first-run explainer, which never renders again — so the
+        // one decision about whether documents leave this machine was a
+        // one-way door. This is the way back.
+        Settings { SettingsScreen() }
     }
 }

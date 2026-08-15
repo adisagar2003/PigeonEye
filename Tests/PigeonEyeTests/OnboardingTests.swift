@@ -58,3 +58,29 @@ import Testing
         #expect(tier.detail.count > 40, "an unexplained tier: \(tier.title)")
     }
 }
+
+// MARK: - Changing your mind
+
+/// **A pane that writes a different key than the reader reads is a setting that
+/// lies** — the same failure `ReaderModel.honour` was added to fix, one level
+/// up. Three views bind this preference now (the explainer, settings, and the
+/// reader that honours it), so the key is a constant they share rather than a
+/// string each of them spells for itself.
+@Test func every_view_that_binds_the_tier_uses_one_key() {
+    #expect(OnboardingScreen.Tier.storageKey == "readingTier")
+
+    // The persisted form is the raw value, which is what lets the preference be
+    // read and set from outside the app at all.
+    for tier in OnboardingScreen.Tier.allCases {
+        #expect(OnboardingScreen.Tier(rawValue: tier.rawValue) == tier)
+    }
+}
+
+/// **Every tier pickable at first run stays pickable afterwards.** The choice
+/// decides what leaves the machine, and one you can make once and never revisit
+/// is worse than one you were never offered: the reader who picks OpenAI to try
+/// it has no way back.
+@Test func settings_offers_every_tier_the_explainer_does() {
+    #expect(SettingsScreen.tiers == OnboardingScreen.Tier.allCases)
+    #expect(!SettingsScreen.tiers.isEmpty)
+}
