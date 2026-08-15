@@ -20,11 +20,24 @@ public final class ReaderModel {
     public private(set) var doc: Document?
     public private(set) var pageImage: CGImage?
 
-    public var page = 1 { didSet { Task { await loadPageImage() } } }
+    /// Blanking the image is the point, not a side effect: without it a jump to
+    /// another page draws the *new* page's highlight over the *old* page's
+    /// raster until the render lands — the reader pointing confidently at the
+    /// wrong place, which is the failure the highlight exists to avoid.
+    public var page = 1 {
+        didSet {
+            guard page != oldValue else { return }
+            pageImage = nil
+            Task { await loadPageImage() }
+        }
+    }
     public var zoom = 1.0
-    /// The field the overlay outlines, or nil. Selection is a UI concern only —
-    /// the field list itself is ground truth from the file and never changes.
+    /// What the overlay outlines. Selection is a UI concern only — neither the
+    /// field list nor the findings change because something is selected. At most
+    /// one is set: selecting in either list clears the other, because two boxes
+    /// on one page with no way to tell which is which is worse than one.
     public private(set) var selectedField: Field?
+    public private(set) var selectedFinding: Finding?
     public var transcriptOpen = false
     public var inspectorOpen = false
 
@@ -86,6 +99,7 @@ public final class ReaderModel {
         page = 1
         zoom = 1
         selectedField = nil
+        selectedFinding = nil
 
         do {
             let document = try await read(url) { [weak self] done, total in
@@ -140,7 +154,7 @@ public final class ReaderModel {
 
     public func step(_ delta: Int) {
         guard let doc else { return }
-        page = min(max(1, page + delta), doc.pagesRead)
+        page = min(max(1, page + delta), doc.navigablePageCount)
     }
 
     public func zoomBy(_ delta: Double) {
@@ -152,11 +166,19 @@ public final class ReaderModel {
     /// here to fall out of step with it.
     public func select(_ field: Field) {
         selectedField = field
+        selectedFinding = nil
         if page != field.page { page = field.page }
     }
 
+    /// Jump to a finding's page and outline the region its quote came from.
+    public func select(_ found: Finding) {
+        selectedFinding = found
+        selectedField = nil
+        if page != found.page { page = found.page }
+    }
+
     private func loadPageImage() async {
-        guard let document = doc, page >= 1, page <= document.pagesRead else {
+        guard let document = doc, page >= 1, page <= document.navigablePageCount else {
             pageImage = nil
             return
         }

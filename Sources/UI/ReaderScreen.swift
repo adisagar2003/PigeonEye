@@ -187,7 +187,7 @@ public struct ReaderScreen: View {
             Spacer()
 
             step("‹", .leftArrow, "⌘←") { model.step(-1) }
-            Text("page \(model.page) / \(doc.pagesRead)")
+            Text("page \(model.page) / \(doc.navigablePageCount)")
                 .font(.body(11.5)).monospacedDigit()
                 .foregroundStyle(Ink.neutral700).frame(minWidth: 78)
             step("›", .rightArrow, "⌘→") { model.step(1) }
@@ -252,22 +252,36 @@ public struct ReaderScreen: View {
         }
     }
 
-    /// The selected field's rect, drawn over the rendered page.
+    /// What the overlay draws on the page currently shown: a selected field's
+    /// rect, or the line a selected finding was quoted from. Both are `Region`s
+    /// in the one origin, which is why one overlay serves both (**I12**).
+    private var highlightedRegion: Region? {
+        if let field = model.selectedField, field.isDrawable, field.page == model.page {
+            return field.region
+        }
+        if let found = model.selectedFinding, found.page == model.page,
+           let region = found.region, region.width > 0, region.height > 0 {
+            return region
+        }
+        return nil
+    }
+
+    /// The selected region, drawn over the rendered page.
     ///
     /// `Field.region` is normalised against the page, and the raster fills this
     /// overlay exactly, so the region multiplies straight through the geometry —
     /// no second coordinate conversion, which is the point of doing the flip
     /// once in `Tools` (**I12**).
     @ViewBuilder private var fieldHighlight: some View {
-        if let field = model.selectedField, field.isDrawable, field.page == model.page {
+        if let region = highlightedRegion {
             GeometryReader { geo in
                 Rectangle()
                     .fill(Ink.accent.opacity(0.16))
                     .overlay(Rectangle().stroke(Ink.accent, lineWidth: 1.5))
-                    .frame(width: field.region.width * geo.size.width,
-                           height: field.region.height * geo.size.height)
-                    .offset(x: field.region.x * geo.size.width,
-                            y: field.region.y * geo.size.height)
+                    .frame(width: region.width * geo.size.width,
+                           height: region.height * geo.size.height)
+                    .offset(x: region.x * geo.size.width,
+                            y: region.y * geo.size.height)
             }
             // Overlays are not clipped to what they overlay. A widget whose rect
             // sits off-page would otherwise stroke over the pane background
@@ -346,6 +360,7 @@ public struct ReaderScreen: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let doc = model.doc {
                     if doc.isForm { fieldsBlock(doc) }
+                    findingsBlock(doc)
                     transcriptBlock(doc)
                     if model.inspectorOpen { inspectorBlock(doc) }
                 } else {
@@ -400,6 +415,66 @@ public struct ReaderScreen: View {
             }
             .frame(maxHeight: 320)
             .blueprint(stroke: Ink.divider)
+        }
+        .padding(18)
+    }
+
+    /// The values worth reading, each with the words it came from.
+    ///
+    /// No confidence ring yet — that is slice 3.2, and `architecture.md` §12 is
+    /// explicit that a number rendered before it is composed from real signals
+    /// is decoration with a number painted on it. The quote is shown instead,
+    /// because that is the claim this slice can actually stand behind (**I2**).
+    private func findingsBlock(_ doc: Document) -> some View {
+        let onPage = doc.findings.filter { $0.page == model.page }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("What it found")
+                .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
+                .foregroundStyle(Ink.accent700)
+                .padding(.bottom, 2)
+            Text("\(doc.findings.count) on this document · \(onPage.count) on page \(model.page)")
+                .font(.body(12)).foregroundStyle(Ink.neutral600)
+                .padding(.bottom, 10)
+
+            if onPage.isEmpty {
+                // The completeness rule: a page with nothing on it says so.
+                // A blank panel reads as a failure to run (`project-overview.md` §9).
+                Text("Nothing found on page \(model.page).")
+                    .font(.body(12.5)).foregroundStyle(Ink.neutral700)
+                    .padding(.vertical, 8)
+            } else {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(onPage.enumerated()), id: \.offset) { _, found in
+                        Button { model.select(found) } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(found.label)
+                                        .font(.body(11)).tracking(0.4).textCase(.uppercase)
+                                        .foregroundStyle(Ink.neutral600)
+                                    Spacer(minLength: 0)
+                                    if found.validated == true {
+                                        Text("checked")
+                                            .font(.mono(9.5)).foregroundStyle(Ink.accent700)
+                                    }
+                                }
+                                Text(found.value ?? "—")
+                                    .font(.mono(13)).foregroundStyle(Ink.text)
+                                // The words it came from. I2 guarantees this is a
+                                // verbatim substring of the transcript.
+                                Text("“\(found.quote)”")
+                                    .font(.body(11.5)).foregroundStyle(Ink.neutral700)
+                                    .lineLimit(2)
+                            }
+                            .padding(.vertical, 7).padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(model.selectedFinding?.id == found.id ? Ink.accent100 : Color.clear)
+                        }
+                        .buttonStyle(.flat)
+                    }
+                }
+                .blueprint(stroke: Ink.divider)
+            }
         }
         .padding(18)
     }

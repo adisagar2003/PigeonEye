@@ -126,15 +126,56 @@ func a_widget_rect_lands_in_the_same_origin_as_a_line(rotation: Int, want: Regio
 /// a field the user must fill. It just has nothing to highlight, and a region of
 /// zero size must not be clamped into one that covers the page.
 @Test func an_offpage_or_zero_sized_widget_is_listed_but_not_drawn() {
+    func field(_ region: Region) -> Field {
+        Field(name: "x", kind: "/Tx", page: 1, region: region)
+    }
     let box = CGRect(x: 0, y: 0, width: 600, height: 800)
     let empty = region(of: CGRect(x: 60, y: 600, width: 0, height: 0), in: box, rotation: 0)
-    let field = Field(name: "x", kind: "/Tx", page: 1, region: empty)
-    #expect(!field.isDrawable)
 
-    let real = Field(
-        name: "y", kind: "/Tx", page: 1,
-        region: Region(x: 0.1, y: 0.2, width: 0.2, height: 0.05))
-    #expect(real.isDrawable)
+    #expect(!field(empty).isDrawable, "a zero-sized rect")
+    // Off-page is the half a size check misses: these all have positive width
+    // and height, and all point at nothing.
+    #expect(!field(Region(x: 1.1, y: 0.2, width: 0.1, height: 0.1)).isDrawable, "wholly right of the page")
+    #expect(!field(Region(x: -0.5, y: 0.2, width: 0.3, height: 0.1)).isDrawable, "wholly left of the page")
+    #expect(!field(Region(x: 0.2, y: 1.4, width: 0.1, height: 0.1)).isDrawable, "wholly below the page")
+    #expect(!field(Region(x: .nan, y: 0.2, width: 0.1, height: 0.1)).isDrawable, "a NaN rect")
+
+    #expect(field(Region(x: 0.1, y: 0.2, width: 0.2, height: 0.05)).isDrawable)
+    // Straddling an edge still draws — it is partly on the page.
+    #expect(field(Region(x: -0.05, y: 0.2, width: 0.2, height: 0.05)).isDrawable)
+}
+
+/// A form's field list is read from the whole file, but OCR stops at
+/// `Limits.maxPages`. Listing a field the reader then refuses to navigate to
+/// would be the app lying about its own list — so the navigable range covers
+/// every page it shows something for. Rasterising needs no OCR, so there is
+/// nothing to stop it.
+@Test func a_field_past_the_ocr_page_cap_is_still_navigable() {
+    let far = Field(name: "late", kind: "/Tx", page: 150,
+                    region: Region(x: 0.1, y: 0.1, width: 0.2, height: 0.02))
+    let doc = Document(
+        url: Fixture.form, kind: .pdf, pageCount: 200, pagesRead: Limits.maxPages,
+        capped: true, pages: [], failedPages: [], fields: [far], findings: [], log: [])
+
+    #expect(doc.navigablePageCount == 150, "a field on page 150 is not reachable")
+
+    let plain = Document(
+        url: Fixture.label, kind: .pdf, pageCount: 200, pagesRead: Limits.maxPages,
+        capped: true, pages: [], failedPages: [], fields: [], findings: [], log: [])
+    #expect(plain.navigablePageCount == Limits.maxPages, "a document with no fields grew its page range")
+}
+
+/// Measured, not assumed: **PDFKit drops annotations on a zero-sized page.** The
+/// identical widget dictionary reads as one `Widget` on a 612×792 page and as
+/// nothing at all on a 0×0 one, so a malformed page's field never reaches our
+/// media-box guard — the framework ate it first.
+///
+/// The guard stays because dividing by a zero box is still how you get a NaN
+/// region, and this test is what stops someone "fixing" a branch that cannot
+/// run.
+@Test func pdfkit_hides_widgets_on_a_zero_sized_page() throws {
+    let fields = try formFields(pdf: Fixture.zeroSizedPage)
+    #expect(fields.isEmpty, "PDFKit started reporting these — the guard now needs to list them")
 }
 
 // MARK: - 6 · A field name is document content
