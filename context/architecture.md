@@ -230,7 +230,7 @@ network and no downloads.** Handy has to ask for a model download; you don't.
 | Boundary | Contract |
 |---|---|
 | **F** form | `pdf → [Field]` where `Field = (name, kind, page, region)`. The AcroForm widgets, read live from the file. **Built** in slice 2.1. Not inference — ground truth — so no confidence, no gate, no escalation, and **I3** does not apply (§9.1). Sits alongside A rather than after it: it needs no OCR, so it runs before any page is rendered and decides the mode. |
-| **A** OCR | `image → [Line]` where `Line = (text, confidence, bbox, isTitle, candidates)`. Pure function, no state, no network. |
+| **A** OCR | `image → [Line]` where `Line = (text, confidence, bbox, isTitle, candidates)`. Deterministic, no network, and it keeps nothing about a document between calls. It is **not** freely parallelisable: implementations may hold a process-wide concurrency gate, which retains no document data and exists only to enforce the measured safe number of in-flight Vision requests. |
 | **B** reasoning | `[Line] + structure → [Finding]`. Chunked (§3.1). Swappable — this is the §3.2 fallback point. |
 | **C** gate | The only place a decision leaves the system. **Local tier:** must render the exact crop set before sending. **Cloud tier:** no per-crop prompt — consent is taken at import for the whole document (`project-overview.md` §4.1) — but the egress function is still the only exit, and every escalation is still recorded and shown. |
 | **D** UI | In-process SwiftUI state. Native has no HTTP boundary here — one fewer surface than the Tauri/Electron design. |

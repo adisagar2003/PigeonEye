@@ -13,9 +13,29 @@ public struct ReaderScreen: View {
     @State private var model = ReaderModel()
     @State private var picking = false
 
+    /// ponytail: `UserDefaults` under the process name, because a SwiftPM
+    /// executable has no bundle. This is now the *only* place that ceiling is
+    /// still felt — the fixture paths that shared it are gone.
+    /// It lands in `~/Library/Preferences/PigeonEye.plist` and
+    /// survives a rebuild, which is what "first run only" has to mean. When
+    /// this ships as a signed .app the key moves to the bundle's domain, and
+    /// existing installs see the explainer once more.
+    @AppStorage("onboardingSeen") private var onboardingSeen = false
+
     public init() {}
 
     public var body: some View {
+        // Replaces the reader rather than sitting over it. An overlay left the
+        // header's focus ring drawing on top of the card — and a reader you can
+        // still tab into is not what a first run should offer.
+        if onboardingSeen {
+            reader
+        } else {
+            OnboardingScreen { onboardingSeen = true }
+        }
+    }
+
+    private var reader: some View {
         VStack(spacing: 0) {
             header
             HStack(spacing: 0) {
@@ -47,30 +67,6 @@ public struct ReaderScreen: View {
                     .foregroundStyle(Ink.accent300)
             }
             Spacer()
-
-            HStack(spacing: 0) {
-                ForEach(ReaderModel.fixtures) { fixture in
-                    let on = model.activeFixture == fixture.id
-                    Button { Task { await model.openFixture(fixture) } } label: {
-                        Text(fixture.label)
-                            .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
-                            .padding(.horizontal, 12).padding(.vertical, 5)
-                            .background(on ? Ink.accent300 : .clear)
-                            .foregroundStyle(on ? Ink.accent900 : Ink.accent200)
-                    }
-                    .buttonStyle(.flat)
-                    // No ⌘1/⌘2 here. Those are "switch to tab N" everywhere
-                    // else on the platform, and binding them to a fixture meant
-                    // a reflex keystroke replaced the document being read with
-                    // a demo one.
-                    .help(fixture.label)
-                    if fixture.id != ReaderModel.fixtures.last?.id {
-                        Rectangle().fill(Ink.accent600).frame(width: 1)
-                    }
-                }
-            }
-            .fixedSize()
-            .overlay(Rectangle().stroke(Ink.accent600, lineWidth: 1))
 
             Button { picking = true } label: {
                 Text("Open…")
@@ -225,7 +221,21 @@ public struct ReaderScreen: View {
     private var pageView: some View {
         ScrollView([.vertical, .horizontal]) {
             Group {
-                if let image = model.pageImage {
+                // Checked before the image, because a failed page has no image
+                // and would otherwise fall through to a spinner that never
+                // stops — the toolbar chip says a page failed while the pane
+                // says it is still working (`project-overview.md` §9).
+                if model.pageFailed {
+                    VStack(spacing: 8) {
+                        Text("Page \(model.page) could not be read.")
+                            .font(.heading(14)).tracking(0.6)
+                            .foregroundStyle(Ink.neutral900)
+                        Text("Every other page was read. Move to another page to carry on.")
+                            .font(.body(12)).foregroundStyle(Ink.neutral700)
+                    }
+                    .padding(30)
+                    .blueprint(stroke: Ink.neutral500)
+                } else if let image = model.pageImage {
                     Image(decorative: image, scale: 1)
                         .resizable().aspectRatio(contentMode: .fit)
                         .frame(width: 720 * model.zoom)

@@ -62,7 +62,7 @@ faked, and nothing outside `context/` is built.
 | Region of the design | F1 |
 |---|---|
 | Header: wordmark, mode line, Setup, Inspector toggle | real, static |
-| Fixture buttons | real — each opens a real file from `assets/`, same as the file picker. Two buttons, not three: **`EPA letter`** → `assets/epa-labels/000524-00529-20241120.pdf`, **`Bad scan`** → `assets/scans/007969-00242-20170111-01.jpg`. The design's third fixture is a university registrar notice, which is out of scope §7 — see §8.5. |
+| Fixture buttons | ~~real — each opens a real file from `assets/`, same as the file picker. Two buttons, not three: **`EPA letter`** → `assets/epa-labels/000524-00529-20241120.pdf`, **`Bad scan`** → `assets/scans/007969-00242-20170111-01.jpg`. The design's third fixture is a university registrar notice, which is out of scope §7 — see §8.5.~~ **Removed after F1 — see the note below this table.** |
 | Document pane: filename, pages-read chip, page ‹ ›, zoom − + | **real** |
 | The page itself | **real** — PDFKit render at 150 dpi, or the image file directly |
 | Transcript disclosure | **real** — Vision output, verbatim |
@@ -79,6 +79,30 @@ faked, and nothing outside `context/` is built.
 **The rule this slice establishes:** a section that has no real data is not
 drawn. If that leaves the right rail nearly empty on day one, the rail is
 honest, and every later feature fills one block.
+
+> **The fixture buttons were removed after F1 shipped.** The row above is left
+> struck through rather than deleted, because it is an accurate record of what
+> F1 built.
+>
+> Two reasons, and the second is the one that settles it.
+>
+> They were read as a *capability list*. Two named documents in the product
+> header answer the question "what can this app open?" with "these two", when
+> the answer is `Limits.formats` — any PDF, PNG or JPEG up to 20 MB.
+>
+> And they could never have survived distribution. `ReaderModel.repoRoot`
+> resolved them through `#filePath`, a **compile-time literal** holding the
+> path of `ReaderModel.swift` on the build machine. On any other machine both
+> buttons resolve to a directory that does not exist and every click draws a
+> "Not read" refusal. The `ponytail:` comment on `repoRoot` said as much from
+> the day it was written: *"The day this ships as a signed .app, they become
+> bundle resources or the buttons go away."*
+>
+> `Open…` (⌘O) and the welcome screen's "Open a file" were always the real
+> import path; they are now the only one. §6 and §7 never asserted the
+> buttons, so no acceptance criterion or stress case moves. §8 row 5 — which
+> records why there were two and not three — is left as written for the same
+> reason as the row above.
 
 ### 3.1 Four states the design does not draw
 
@@ -108,14 +132,14 @@ its SwiftPM target, so the dependency graph enforces it instead of a reviewer.
 | 2 | `Sources/Agent` | `read(fileURL) -> Document` — orchestrates rasterise + OCR, owns the step log |
 | 4 | `Sources/UI` | SwiftUI, design tokens, both screens |
 | — | `Sources/PigeonEye` | app entry |
-| — | `Sources/ocr` | the CLI, so `tools.py` and `eval/` keep working |
+| — | `Sources/ocr-cli` | the CLI, so `spikes/page_index.py` and `eval/` keep working |
 
 Layer 3 (`Gate`) **does not exist yet**, and that is checkable:
 `rg 'URLSession|http' Sources` must return nothing.
 
 `ocr.swift` moves from the repo root into `Sources/Tools/`, and its layer-1
 exemption dies with the move (`coding-standards.md` §1). The compiled `./ocr`
-binary at the root stays — `tools.py`, `eval/openai_run.py` and
+binary at the root stays — `spikes/page_index.py`, `eval/openai_run.py` and
 `eval/ocr_bench.py` all shell out to it — and is refreshed from
 `.build/release/ocr` after a build.
 
@@ -125,9 +149,17 @@ binary at the root stays — `tools.py`, `eval/openai_run.py` and
 ocr(CGImage) -> [Line]
 ```
 
-Pure. No state, no network, no UI knowledge. `architecture.md` §10 depends on
-this staying a pure function with a JSON contract — it is what makes a later
-Tauri port a re-shell rather than a rewrite.
+Deterministic. No network, no UI knowledge, and nothing about a document kept
+between calls. `architecture.md` §10 depends on this staying a function with a
+JSON contract — it is what makes a later Tauri port a re-shell rather than a
+rewrite.
+
+It is **not** freely parallelisable. The implementation holds a process-wide
+concurrency gate — no document data, only a cap on in-flight Vision requests,
+because stacking them segfaults inside Apple's TextRecognition. A caller that
+bounds its own fan-out has not bounded anything: two callers doing that put
+twice the limit in flight, which is why the gate lives at the boundary and not
+in `Agent.read`.
 
 ### 4.3 The coordinate origin, converted once
 
@@ -219,7 +251,7 @@ Two rules carried from `coding-standards.md` §4 that bite in this slice:
 - [ ] `Line` lives in `Contracts`, bbox upper-left, asserted against a fixture line of known position
 - [ ] `rg 'import Vision' Sources | grep -v Tools/` empty · same for `SwiftUI`/`UI` and `URLSession`/`Gate`
 - [ ] The source file is opened read-only; there is no write path to it (**I7**)
-- [ ] `./ocr --json` still produces the same shape `tools.py` expects
+- [ ] `./ocr --json` still produces the same shape `spikes/page_index.py` expects
 - [ ] Nothing persists (**I9**) and no document text, filename, path or key reaches a log (`coding-standards.md` §5.2)
 
 ---

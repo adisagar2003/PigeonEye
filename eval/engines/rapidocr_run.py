@@ -1,7 +1,7 @@
 """RapidOCR wrapper — portable OCR (ONNX, no PyTorch, runs on macOS/Linux/Windows).
 
-Two modes, matching what ocr.swift/spike_vision give us so the tool layer can
-swap engines without the caller knowing:
+Two modes, matching what the `ocr` CLI (`Sources/Tools/OCR.swift`) gives us so the
+tool layer can swap engines without the caller knowing:
 
     python eval/engines/rapidocr_run.py page.jpg           # plain text, reading order
     python eval/engines/rapidocr_run.py page.jpg --json    # text + confidence + bbox

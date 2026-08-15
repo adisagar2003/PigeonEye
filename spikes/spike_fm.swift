@@ -2,7 +2,8 @@
 // Foundation Model do the *reasoning* tier - read OCR text of a government
 // document and extract what matters - or do we need cloud for that?
 //
-//   swiftc -O spike_fm.swift -o spike_fm && ./ocr assets/scans/X.jpg | ./spike_fm
+//   swiftc -O spikes/spike_fm.swift -o spike_fm
+//   ./ocr assets/scans/X.jpg | ./spike_fm
 //
 // Throwaway. Delete once the answer is recorded.
 import Foundation

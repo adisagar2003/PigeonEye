@@ -28,34 +28,22 @@ public final class ReaderModel {
     public var transcriptOpen = false
     public var inspectorOpen = false
 
-    public init() {}
+    /// True when the page on screen is one that could not be rendered. A failed
+    /// page has no image, and "no image" is otherwise indistinguishable from
+    /// "still rendering" — see `ReaderScreen.pageView`.
+    public var pageFailed: Bool { doc?.failedPages.contains(page) ?? false }
 
-    /// The two fixtures are real documents from `assets/`, opened the same way
-    /// the file picker opens anything else. The design's third fixture is a
-    /// university registrar notice, which is outside scope §7.
-    public struct Fixture: Identifiable, Sendable {
-        public let id: String
-        public let label: String
-        public let path: String
-    }
+    /// How a document gets read. Injectable for exactly one reason: progress is
+    /// delivered on unstructured tasks, so the only way to test what happens
+    /// when one lands *after* the read has finished is to keep the handler and
+    /// call it late. Production always gets `Agent.read`.
+    private let read: @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
 
-    /// `007969-00242-...-01.jpg` used to sit behind "Bad scan" and is not one —
-    /// it is a clean digital render, and the `WEAL PROTECTED` misread recorded
-    /// against it comes from the circular seal, not from scan damage. A fixture
-    /// button whose label is false about its own document is the exact failure
-    /// `project-overview.md` §9 forbids.
-    ///
-    /// The replacement is the whole 40-page photocopy rather than one page of
-    /// it: degradation is not uniform down a document, and one good page proves
-    /// nothing about the confidence reading on page 39.
-    public static let fixtures: [Fixture] = [
-        .init(id: "label", label: "EPA letter", path: "assets/epa-labels/000524-00529-20241120.pdf"),
-        .init(id: "scan", label: "Bad scan", path: "assets/epa-labels/007969-00186-20080911.pdf"),
-    ]
-
-    public var activeFixture: String? {
-        guard let doc else { return nil }
-        return Self.fixtures.first { doc.url.path.hasSuffix($0.path) }?.id
+    public init(
+        read: @escaping @Sendable (URL, (@Sendable (Int, Int) -> Void)?) async throws -> Document
+            = Agent.read
+    ) {
+        self.read = read
     }
 
     /// Identifies the newest request. Every `await` in this file is a point where
@@ -102,8 +90,15 @@ public final class ReaderModel {
         do {
             let document = try await read(url) { [weak self] done, total in
                 Task { @MainActor in
-                    guard self?.requestID == id else { return }
-                    self?.phase = .reading(done: done, total: total)
+                    // `requestID` only rejects a *different* open. A progress
+                    // event from *this* read can still be queued on the main
+                    // actor when the read returns, and would then push a
+                    // finished document back to "Reading page…" with nothing
+                    // left running to move it forward. Only a request that is
+                    // still reading may move the bar.
+                    guard let self, self.requestID == id, case .reading = self.phase
+                    else { return }
+                    self.phase = .reading(done: done, total: total)
                 }
             }
             guard requestID == id else { return }
@@ -121,10 +116,6 @@ public final class ReaderModel {
             current = nil
             phase = .failed(error.localizedDescription)
         }
-    }
-
-    public func openFixture(_ fixture: Fixture) async {
-        await open(Self.repoRoot.appending(path: fixture.path))
     }
 
     /// Show a message and take it away again. Generation-token clearing for the
@@ -177,12 +168,4 @@ public final class ReaderModel {
         guard requestID == id, page == requestedPage, doc?.url == document.url else { return }
         pageImage = rendered
     }
-
-    /// ponytail: fixtures are found relative to the source tree, because a
-    /// SwiftPM executable has no bundle to put resources in. The day this ships
-    /// as a signed .app, they become bundle resources or the buttons go away.
-    static let repoRoot = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // UI
-        .deletingLastPathComponent()  // Sources
-        .deletingLastPathComponent()  // repo root
 }

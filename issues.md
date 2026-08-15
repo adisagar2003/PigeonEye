@@ -344,7 +344,7 @@ failure falls back to 4.1's output.
 | **`trap:wrong_deadline_anchor`** | Does not fire. The scorer already discriminates — a hand-written dangerous answer scored 10/12 and failed exactly this. |
 | A chunk larger than the window | Splits and proceeds; does not throw at runtime on the one document that matters |
 | Model invents a number not in the transcript | Rejected by **I2**, not rendered |
-| **45 pages of chunks, wall clock** | Record it. If it's beyond demo-tolerable, chunk selection uses the page index (`tools.py`, 1,426 tokens vs 32,394) rather than every chunk. |
+| **45 pages of chunks, wall clock** | Record it. If it's beyond demo-tolerable, chunk selection uses the page index (`spikes/page_index.py`, 1,426 tokens vs 32,394) rather than every chunk. |
 | Endpoint returns 200 with an empty body | Falls back, doesn't render an empty summary as success |
 
 ---
