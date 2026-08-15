@@ -199,6 +199,14 @@ private func page(_ text: String, conf: Float = 0.9) -> Page {
     ("EPA Reg. No. 524-529", true),
     ("EPA Registration Number: 7969-242", true),
     ("MASTER LABEL FOR EPA REG. NO. 524-529", true),
+    // EPA's own cover letters use a second wording for the same number, and one
+    // cue cost `524-529` four pages and a whole single-page scan before this
+    // case existed.
+    ("Admin Number: 524-529", true),
+    // And OCR read the E of EPA as a B on the 035915 scan, at confidence 0.668.
+    // `registration` + `number` is what survives that, and `epa` turns out never
+    // to have been the load-bearing half of the cue.
+    ("BPA Registration Number: 35915-4", true),
 ])
 func a_registration_number_is_claimed_only_where_the_line_says_so(text: String, claimed: Bool) async {
     let regs = await findings(on: page(text), number: 1)
@@ -261,6 +269,30 @@ func a_detected_date_with_no_date_in_it_is_not_a_date(text: String, kept: Bool) 
     #expect(!found.contains { $0.label.contains(where: \.isUppercase) && $0.label.hasPrefix("postal") },
             "a raw detector type reached the label: \(found.map(\.label))")
     #expect(found.contains { $0.kind == .contact })
+}
+
+/// **The cue's recall side, which the precision measurement hid.** Two real
+/// single-page scans, each of which a one-wording cue emptied of its
+/// registration number — and a one-page document has no other page to recover
+/// from.
+///
+/// Asserted against the scans rather than against strings, because both failures
+/// were facts about the corpus (EPA writes `Admin Number:` on its cover letters;
+/// OCR reads `EPA` as `BPA` at 0.668) and no hand-built line would have found
+/// either.
+@Test(arguments: [
+    ("assets/scans/000524-00529-20241120-01.jpg", "524-529"),
+    ("assets/scans/035915-00004-20210302-01.jpg", "35915-4"),
+])
+func the_registration_number_survives_a_letter_that_words_it_differently(
+    scan: String, number: String
+) async throws {
+    let read = try await ocr(image(at: Fixture.root.appending(path: scan)))
+    let found = await findings(on: read, number: 1)
+
+    let identifiers = found.filter { $0.kind == .identifier }.map { $0.value ?? "" }
+    #expect(found.contains { $0.label == Format.epaRegistration.label && $0.value == number },
+            "the cue cost this document its registration number: \(identifiers)")
 }
 
 /// Every finding lands in a group, so a filter chip set cannot hide one.

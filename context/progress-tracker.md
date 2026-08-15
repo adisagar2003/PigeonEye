@@ -170,8 +170,8 @@ findings**. Nothing here was visible from reading the code.
 | | before | after |
 |---|---|---|
 | Distinct values labelled `EPA reg. no.` across the corpus | **131** | **7** |
-| …rows | 336 | 61 |
 | On IRS P17, a tax guide with no EPA anywhere in it | 42 | 0 |
+| Pages the real `35915-4` is found on | 30 | 30 |
 
 The seven that survive are the seven the corpus contains: `524-529`, `524-549`,
 `524-522`, `7969-186`, `7969-242`, `35915-4`, `66330-424`. What went is phone
@@ -184,9 +184,27 @@ the most dangerous shape a defect can take in this product.
 
 `\b\d{3,5}-\d{1,5}\b` cannot be tightened into precision; a five-digit-dash-
 five-digit number is a common string. The precision lives in the words on the
-line, and every genuine occurrence in the corpus sits next to "EPA Reg. No." or
-"EPA Registration Number". Hence `Format.cue` — and it gates the *name*, never
-the value.
+line. Hence `Format.cues` — and it gates the *name*, never the value.
+
+**Then the same dump was read the other way round, and that is what made it
+three wordings.** A precision number alone would have shipped a regression:
+
+| The line | What one wording cost | Group it needed |
+|---|---|---|
+| `Admin Number: 524-529` | EPA's **cover letters** word it differently from its labels. `524-529` fell from 8 pages to 4, and a **single-page scan** of that letter lost it outright — a one-page document has no other page to recover from | `admin` + `number` |
+| `BPA Registration Number: 35915-4` | OCR read the E as a B at conf 0.668. This was written into the stress table as a *risk* before it was found happening | `registration` + `number` |
+
+Loosening cost nothing measurable. Over the born-digital text of the whole
+corpus — **40,833 lines**, the three IRS publications included — all three groups
+together claim **6 distinct values and 0 wrong ones**. The word carrying the
+claim is `registration`/`reg`; **`epa` was never the load-bearing half**, and only
+the recall pass could have shown that.
+
+Residual, and deliberate: a bare `524-529` in a page header carries no wording at
+all and is not claimed — 6 of its 8 pages. The value is never lost, because the
+index groups across the document. Carried as a `ponytail:` ceiling in
+`Tools/Findings.swift`; the upgrade is document-level confirmation, which needs a
+pass over all pages and so belongs in `Agent`.
 
 **Half the findings were the same fact said twice.**
 
@@ -207,9 +225,12 @@ tax guide. They landed in the one group a reader opens to find a deadline.
 
 | | before | after |
 |---|---|---|
-| Findings | 8,421 | **5,794** (−31.2%) |
-| Rows carrying *checked* | 4,405 | 4,130 |
-| Index rows (distinct values) | — | **2,412** |
+| Findings | 8,421 | **5,778** (−31.4%) |
+| Rows carrying *checked* | 4,405 | 4,120 |
+| Index rows (distinct values) | — | **2,408** |
+
+Read these to ±1%: Vision is not deterministic run to run, and three dumps of the
+same corpus differed by ~20 rows in 5,800. The 131 → 7 is not in that band.
 
 **And the reason the index exists at all:**
 

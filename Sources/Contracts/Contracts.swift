@@ -102,22 +102,37 @@ public enum Format: String, Codable, Sendable, CaseIterable {
         }
     }
 
-    /// Words the line must carry before this shape may be *claimed*, or nil when
-    /// the shape stands on its own.
+    /// Wordings the line must carry before this shape may be *claimed* — any one
+    /// group, all of its words — or nil when the shape stands on its own.
     ///
     /// Measured, not assumed: across `assets/`, `\b\d{3,5}-\d{1,5}\b` matched 78
     /// distinct values and **9 were registration numbers**. The rest were phone
     /// numbers (`1-800-424-9300`), IRS notice numbers (`2021-48`), OMB numbers
     /// (`1545-0074`) and ZIP+4 (`20250-9410`) — every one of them rendered
     /// *checked*, because they pass the shape. A shape this common is not a
-    /// claim; the words next to it are. Every genuine occurrence in the corpus
-    /// sits on a line that also says "EPA Reg. No." or "EPA Registration Number".
+    /// claim; the words next to it are.
+    ///
+    /// **A list of groups rather than one, and every group is a document that
+    /// broke the one before it.** Each was found by measuring recall after the
+    /// cue landed, not by imagining what a document might say:
+    ///
+    /// | Group | The line that needed it |
+    /// |---|---|
+    /// | `epa` + `reg` | `EPA Reg. No. 524-529` — the label wording |
+    /// | `admin` + `number` | `Admin Number: 524-529` — EPA's *cover letter* wording. One group cost `524-529` four of its eight pages and one document outright, because a single-page scan of that letter has no other page to recover from |
+    /// | `registration` + `number` | `BPA Registration Number: 35915-4` — OCR read the E as a B. The cue line being misread was carried as a known risk; this is it happening, at confidence 0.668 on a real scan |
+    ///
+    /// Loosening costs nothing measurable: across the born-digital text of the
+    /// whole corpus — 40,833 lines, the three IRS publications included — all
+    /// three groups together claim **6 distinct values and 0 wrong ones**. The
+    /// cue is doing its work through the words `registration`/`reg`, and `epa`
+    /// was never the load-bearing half.
     ///
     /// This declines to *label* a value, it never discards one: the phone number
     /// is still emitted by the detector that legitimately found it.
-    public var cue: [String]? {
+    public var cues: [[String]]? {
         switch self {
-        case .epaRegistration: ["epa", "reg"]
+        case .epaRegistration: [["epa", "reg"], ["admin", "number"], ["registration", "number"]]
         default: nil
         }
     }

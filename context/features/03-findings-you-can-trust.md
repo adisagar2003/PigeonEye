@@ -123,10 +123,27 @@ against a shape that common is not achievable by tightening the shape; it is
 carried by the words on the line, and every genuine occurrence in the corpus sits
 next to "EPA Reg. No." or "EPA Registration Number".
 
-So `Format.cue`: words the line must carry before a shape may be claimed under
-that name. It declines to *label* a value, it never discards one — the phone
-number is still emitted by the detector that legitimately found it, which is
-`the_phone_number_behind_a_rejected_registration_number_survives`.
+So `Format.cues`: wordings the line must carry before a shape may be claimed
+under that name — any one group, all of its words. It declines to *label* a
+value, it never discards one; the phone number is still emitted by the detector
+that legitimately found it
+(`the_phone_number_behind_a_rejected_registration_number_survives`).
+
+**Precision is half the measurement, and the recall half is what made it three
+groups.** After the cue landed, the same dump was read the other way round: what
+did it *cost*? Two real single-page scans had been emptied of their registration
+number, and a one-page document has no other page to recover from.
+
+| The line | What broke | Group it needed |
+|---|---|---|
+| `Admin Number: 524-529` | EPA's **cover letters** word it differently from its labels. Cost `524-529` four of its eight pages and one document outright | `admin` + `number` |
+| `BPA Registration Number: 35915-4` | OCR read the E as a B, at conf 0.668. This was carried in §6.1 as a *risk*; it is a real line on a real scan | `registration` + `number` |
+
+Loosening cost nothing measurable: over the born-digital text of the whole corpus
+— 40,833 lines, the three IRS publications included — all three groups together
+claim **6 distinct values and 0 wrong ones**. The word doing the work is
+`registration`/`reg`; `epa` was never the load-bearing half, which only the
+recall pass could have shown.
 
 **One value in one place was two rows.** The `amount` validator found 693
 amounts on 120 pages of IRS P17; `moneyAmount` found 695 of the same ones. Two
@@ -206,7 +223,8 @@ that decided it would be layer 1's vocabulary leaking into layer 4
 | **A tax guide with no EPA in it** | Zero registration numbers. It found 42. |
 | **`$1,000` found by both producers** | One row, and it is the validator's. **Tested** — `one_value_in_one_place_is_one_row`. |
 | **`1.6-2.4` read as a calendar event** | Not filed under Dates. **Tested** — `a_detected_date_with_no_date_in_it_is_not_a_date`. |
-| **The cue line is itself misread** | The value is lost as a *registration number*, not lost. A recall cost paid on purpose against an 88% precision defect — and the honest reading of it, because the cue is a heuristic and §3.4's "find it and fail it" applies to values, not to labels. |
+| **The cue line is itself misread** | **This happens.** `BPA Registration Number: 35915-4` — OCR read the E as a B on `035915-00004-20210302-01.jpg` at conf 0.668, and one wording emptied that scan of its registration number. Answered by a wording that does not depend on the misread token, and pinned by `the_registration_number_survives_a_letter_that_words_it_differently`. Written down because the row above it was a *prediction* until the recall pass ran, and a stress row nobody measured is a wish (the F1 lesson). |
+| **A residual recall cost remains** | A bare `524-529` in a page header, on a line with no wording at all, is not claimed. `524-529` is on 6 of its 8 original pages. The value is not lost — the index groups across the document, so the row is there with a shorter page list. The upgrade is document-level confirmation: a value that earns a wording *once* keeps the name everywhere in that document. Not built; it needs a pass over all pages, and the index already covers the reader's case. |
 | A value on seven pages | One row that lists them and walks them. **Tested** — `a_row_walks_its_occurrences_in_page_order_and_wraps`. |
 | The index against a real document | Loses no finding: occurrence counts sum to `findings.count`. **Tested** — `a_real_label_indexes_to_fewer_rows_than_it_has_findings`. |
 | A search matching nothing | Names the query and says so. Never a blank panel. |

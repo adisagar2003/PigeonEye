@@ -115,10 +115,19 @@ public func findings(on page: Page, number: Int) async -> [Finding] {
         let context = line.text.lowercased()
 
         for format in Format.allCases {
-            // The shape is not the claim. `Format.cue` names the words the line
-            // must carry before this format may put its name on a value — see
-            // the 88% measured there.
-            if let cue = format.cue, !cue.allSatisfy(context.contains) { continue }
+            // The shape is not the claim. `Format.cues` names the wordings the
+            // line must carry before this format may put its name on a value —
+            // see the 88% measured there. Any one group, all of its words.
+            //
+            // ponytail: the cue is read off *this* line only, so a bare
+            // `524-529` in a page header is not claimed — 6 of that number's 8
+            // pages, and the value itself is never lost because the index groups
+            // across the document. The upgrade is document-level confirmation
+            // (a value that earns a wording once keeps the name everywhere in
+            // that document), which needs a pass over all pages and therefore
+            // belongs in `Agent`, not here.
+            if let cues = format.cues,
+               !cues.contains(where: { $0.allSatisfy(context.contains) }) { continue }
 
             for match in line.text.matches(of: candidatePattern(for: format)) {
                 let quote = String(match.output)
