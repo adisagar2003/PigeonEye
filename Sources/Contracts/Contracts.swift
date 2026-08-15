@@ -142,10 +142,84 @@ public enum Origin: String, Codable, Sendable {
     case acroform, datadetector, validator, model
 }
 
-public struct Signal: Codable, Sendable {
+public struct Signal: Codable, Sendable, Equatable {
     public let name: String
     public let value: Double
     public init(_ name: String, _ value: Double) { self.name = name; self.value = value }
+
+    /// The signal names the composite understands. Strings, because the
+    /// inspector renders them and `architecture.md` §12 ranks them by name — but
+    /// named constants, because a typo in a raw string silently removes a signal
+    /// from the composite instead of failing.
+    public static let ocr = "ocr"
+    public static let validator = "validator"
+    public static let homoglyph = "homoglyph"
+    /// A model's opinion of itself. Never sufficient alone (**I4**).
+    public static let model = "model"
+}
+
+/// How sure the reader is, as a colour. Three states, because a number alone
+/// invites reading precision into it that isn't there.
+public enum Band: String, Codable, Sendable {
+    case green, amber, red
+}
+
+/// The confidence composite — `architecture.md` §12.
+///
+/// **The two rules are not symmetrical, and that asymmetry is the feature:**
+///
+/// 1. **Low confidence is a reliable trigger.** Genuine garbage clusters at the
+///    bottom of Vision's range — the seal misread `WEAL PROTEIN` scored 0.062,
+///    2nd lowest of 1092 measured lines. Below the escalate point is red.
+/// 2. **High confidence is not a licence to show green.** The four *highest*
+///    scores in the same corpus (0.885, 0.828, 0.824, 0.788) were all `口`,
+///    checkbox artifacts read as CJK glyphs. Green needs a reason beyond the
+///    score: a format validator passed, or the top candidates agree without a
+///    homoglyph substitution.
+///
+/// Without rule 2 the corpus's worst garbage renders as its most confident
+/// finding, and the ring becomes decoration with a number painted on it.
+public struct Confidence: Sendable, Equatable {
+    public let score: Double
+    public let band: Band
+    /// Kept, not folded away: **I4** requires the inspector to show the
+    /// breakdown, which a composite that discarded its inputs could not do.
+    public let signals: [Signal]
+
+    /// Fold signals into a band, or `nil` when there is nothing trustworthy to
+    /// fold.
+    ///
+    /// Returns `nil` rather than a low score when the only signal is the model's
+    /// own self-report (**I4**). Not-scored and scored-badly are different
+    /// claims, and collapsing them would let a model talk its way onto the
+    /// screen with a number no one measured.
+    public static func compose(_ signals: [Signal]) -> Confidence? {
+        func value(_ name: String) -> Double? {
+            signals.first { $0.name == name }?.value
+        }
+        // I4 — at least one signal that is not the model talking about itself.
+        guard signals.contains(where: { $0.name != Signal.model }) else { return nil }
+
+        let validator = value(Signal.validator)
+        let homoglyph = value(Signal.homoglyph)
+        // With no OCR reading at all — an `acroform` value, say — there is
+        // nothing to be uncertain about but the validator's verdict.
+        let score = value(Signal.ocr) ?? (validator == 1 ? 1.0 : 0.0)
+
+        let band: Band
+        if validator == 0 {
+            // I3 — a failed format check is knowledge, not noise. No score
+            // argues it back to green; a low one still argues it down to red.
+            band = score < Thresholds.escalate ? .red : .amber
+        } else if score < Thresholds.escalate {
+            band = .red
+        } else if score >= Thresholds.confident && (validator == 1 || homoglyph == 0) {
+            band = .green
+        } else {
+            band = .amber
+        }
+        return Confidence(score: score, band: band, signals: signals)
+    }
 }
 
 /// One value the reader is willing to show, and the words it came from.

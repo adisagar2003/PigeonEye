@@ -435,6 +435,12 @@ public struct ReaderScreen: View {
                 .padding(.bottom, 2)
             Text("\(doc.findings.count) on this document · \(onPage.count) on page \(model.page)")
                 .font(.body(12)).foregroundStyle(Ink.neutral600)
+                .padding(.bottom, 8)
+
+            // The key to the rings. Without it the colours are decoration, and
+            // the ring is the one thing on screen making a claim about how far
+            // the reader should trust a value. Hover any ring for its reasons.
+            ConfidenceLegend()
                 .padding(.bottom, 10)
 
             if onPage.isEmpty {
@@ -453,9 +459,10 @@ public struct ReaderScreen: View {
                                         .font(.body(11)).tracking(0.4).textCase(.uppercase)
                                         .foregroundStyle(Ink.neutral600)
                                     Spacer(minLength: 0)
-                                    if found.validated == true {
-                                        Text("checked")
-                                            .font(.mono(9.5)).foregroundStyle(Ink.accent700)
+                                    if let confidence = Confidence.compose(found.signals) {
+                                        ConfidenceRing(confidence)
+                                    } else {
+                                        UnscoredMark()
                                     }
                                 }
                                 Text(found.value ?? "—")
