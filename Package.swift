@@ -6,6 +6,10 @@ import PackageDescription
 // Gate (layer 3) is the only target allowed to hold a socket, and it depends on
 // Contracts alone: an egress that can reach Tools can read a file, and the one
 // thing this boundary promises is that it cannot.
+//
+// Agent does NOT depend on Gate and must not — an agent that opens a socket is a
+// bug against I1, not a style issue (coding-standards.md §1). UI is the only
+// layer that sees both, which is why the additive-only fallback lives there.
 let package = Package(
     name: "PigeonEye",
     platforms: [.macOS("26.0")],

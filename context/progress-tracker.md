@@ -60,6 +60,46 @@ construction point that checks the quote against the transcript (**I2**). Chat
 prose is prose — it is rendered as an answer, never promoted into the findings
 list, so I2 is untouched rather than weakened.
 
+**F3 slice 3.2 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
+**F4 slices 4.1 and 4.2 are complete.** The document now explains itself: doc
+type, what it is, a summary, an urgency and next steps. 4.1 assembles all of it
+locally with **zero model calls**, and that is not a fallback bolted on
+afterwards — it is the thing the cloud leg is additive *to*. **I6** says the
+local result survives any cloud failure, and the only way to mean that is for it
+to exist first and stand alone.
+
+4.2 adds the second function to layer 3. `Gate.explain` and F9's `Gate.answer`
+share one transport, one I13 assertion and one key header, because two egress
+paths with two sets of rules is how one of them quietly grows a third.
+
+**What 4.2 does not do**, and 4.3 still owes: the local tier has no reading path
+of its own here. Choosing "On this Mac" means the locally-assembled explanation
+and nothing more — no cloud button, which is the point, but no on-device prose
+either.
+
+**Review found four defects and three were one defect: the screen under-reported
+egress.** A 401/429/500 fell back saying "Read on this machine only" while the
+inspector said nothing had left — after the transcript had already been answered
+by a server. I13 was asserted only against the part of the request that could be
+trimmed, so an oversized fixed block was posted anyway. And a reply that decoded
+but carried no summary replaced a complete local explanation with an empty
+checklist, which is **I6** inverted. All three now have tests that fail without
+the fix; `features/04-explain-it.md` §6.1 is the table. Under-reporting egress is
+the dangerous direction for this product to be wrong in, and it is the direction
+it was wrong in three times in one slice — worth remembering when F5 adds crop
+egress on top.
+
+**F3 slice 3.2 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
+by the file, and a form's field list is read straight out of the AcroForm with
+page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
+cryptic IRS field names) is deliberately deferred — see the decision log.
+
+The current row is **3.2 · a confidence ring that can't lie**
+(`features/03-findings-you-can-trust.md`): the composite from
+`architecture.md` §12 and the ring that renders it. Slice **3.1** is complete —
+format validators and Vision's data detectors, each finding carrying value,
+quote, page, region and origin, with **I2**'s substring check at the single
+construction point.
 **F3 slice 3.4 is `complete` — the findings index, and the filters behind it.**
 Reading 3.1's output over all of `assets/` is what produced the slice: 8,421
 findings, and the three defects below were all the same defect, which is that a
@@ -124,6 +164,9 @@ feature has a spec under `context/features/`. One source of truth, per
 |---|---|---|---|
 | F1 | Read it locally | [`features/01-read-it-locally.md`](features/01-read-it-locally.md) | **complete** |
 | F2 | Form mode | [`features/02-form-mode.md`](features/02-form-mode.md) | **partial** — 2.1 complete, 2.2 deferred |
+| F3 | Findings you can trust | [`features/03-findings-you-can-trust.md`](features/03-findings-you-can-trust.md) | **in progress** — 3.1 |
+| F4 | Explain it | [`features/04-explain-it.md`](features/04-explain-it.md) | **partial** — 4.1 and 4.2 complete, 4.3 open |
+| F5 | Escalate with consent | — | not started — **but layer 3 now exists**, see F4.2 |
 | F3 | Findings you can trust | [`features/03-findings-you-can-trust.md`](features/03-findings-you-can-trust.md) | **in progress** — 3.1, 3.2 and 3.4 complete, 3.3 open |
 | F4 | Explain it | — | not started |
 | F5 | Escalate with consent | — | not started |
@@ -766,6 +809,9 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **`eval/` stays Python and stays at the root level** — it is measurement, not a layer, and `assets/golden/` + the four metrics have no Swift equivalent worth writing | mine |
 | **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
 | **I2 is enforced at one construction point in `Tools`, not per caller** — a caller cannot invent a quote because a caller cannot build a `Finding` any other way. A quote absent from the transcript yields nil rather than throwing, so one bad line does not cost the page its other findings | mine |
+| **`Sources/Gate` exists as of F4.2, and the trust claim changed shape with it.** It was "there is no egress API, checkable with one grep"; it is now "there is exactly one, and it is a file you can read in full". `scripts/layers.sh` is what keeps that true — it caught a `URLSession` default argument in layer 4 during this very slice | consequence |
+| **Agent does not depend on Gate and must not.** The additive-only fallback lives in UI, the only layer allowed to see both. An agent that opens a socket is a bug against I1, not a style issue | mine |
+| **The consent moment in cloud tier is the button press.** The grant is taken for the whole document (`project-overview.md` §4.1), the button states what leaves before it is pressed, and nothing is sent on open | yours, applied |
 | **First iteration is cloud-only, on the OpenAI key.** A local model tier remains an option behind the same OpenAI-compatible base URL, offered rather than required. Closes open question 2 and turns 4.3 from a gate into a measurement — nothing in F3 or F4.1 changes, because both are deterministic and make no model call at all | yours |
 | **Search patterns are looser than validation patterns** — one pattern for both drops `10.5 0Z` (OCR for `10.5 oz`) entirely, so the user is never told the rate exists. Find it and fail it; discarding it is the app deciding for the reader | mine, from the F3 review |
 | **`Finding` is `Encodable` with a `package` initialiser** — a public init or a synthesised `Decodable` is a second way in with no transcript to check against, which would make I2 a comment rather than a rule | mine, from the F3 review |

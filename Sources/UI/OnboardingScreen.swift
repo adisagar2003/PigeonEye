@@ -22,16 +22,22 @@ public struct OnboardingScreen: View {
         var picksTier = false
     }
 
-    /// Which tier does the reasoning — `architecture.md` §6, and the row in §5
-    /// that decided "cloud for the demo, local where hardware allows".
+    /// Which tier does the reasoning — `architecture.md` §6, Boundary C, and the
+    /// row in §5 that decided "cloud for the demo, local where hardware allows".
     ///
     /// **This is now load-bearing rather than recorded.** `ReaderModel.honour`
-    /// reads it, and it decides whether a question is answered on this Mac or
-    /// sent to an endpoint. A preference nothing consults is a setting that
-    /// lies, and this one used to be exactly that.
+    /// reads it, and it decides both whether a question is answered on this Mac
+    /// or sent to an endpoint, and whether the Explain with OpenAI button is
+    /// offered at all. A preference nothing consults is a setting that lies, and
+    /// this one used to be exactly that.
     ///
-    /// ponytail: lives in UI because UI is where it is picked. It moves down to
-    /// `Contracts` if a lower layer ever needs to branch on it.
+    /// It stays in UI rather than moving to `Contracts`, because the Gate does
+    /// not read it — UI reads it and decides whether to call the Gate. Nothing
+    /// below layer 4 has an opinion about which tier a person picked.
+    ///
+    /// **Asking** on `.local` is answered on-device and nothing leaves.
+    /// **Explaining** on `.local` is the locally-assembled explanation and
+    /// nothing more — no on-device prose yet, which is slice 4.3.
     public enum Tier: String, CaseIterable, Identifiable, Sendable {
         case openAI
         case local
@@ -51,11 +57,13 @@ public struct OnboardingScreen: View {
         public var detail: String {
             switch self {
             case .openAI:
-                "The text of a page you ask about leaves the machine, and only "
-                    + "after you agree to it for that document."
+                "The text you ask about — or the whole document, if you press "
+                    + "Explain — leaves the machine, and only after you agree "
+                    + "to it for that document."
             case .local:
-                "Apple's on-device model answers your questions here. Nothing "
-                    + "leaves, and there is no key to supply."
+                "Apple's on-device model answers your questions here, and the "
+                    + "explanation is the one this app assembles itself. "
+                    + "Nothing leaves, and there is no key to supply."
             }
         }
     }
@@ -82,10 +90,11 @@ public struct OnboardingScreen: View {
               title: "Reading happens here, and only here",
               detail: """
                       Rendering and reading both happen on this machine — no \
-                      page image and no file ever leaves it. The one thing that \
-                      can leave is the text of a page you ask a question about, \
-                      and only after you say so. The inspector lists every page \
-                      that left, or says nothing did.
+                      page image and no file ever leaves it. Two things can \
+                      leave, both only after you say so: the text of a page you \
+                      ask about, and the text of the document if you press \
+                      Explain with OpenAI. The inspector lists everything that \
+                      left, or says nothing did.
                       """),
         .init(kicker: "What you get",
               title: "Every page, or an honest gap",
@@ -99,10 +108,11 @@ public struct OnboardingScreen: View {
               title: "OpenAI answers questions, unless you say otherwise",
               detail: """
                       Ask about a page and its text goes to OpenAI, once you \
-                      agree to it for that document. Pick On this Mac and \
-                      Apple's on-device model answers instead — nothing leaves, \
-                      and there is nothing to agree to. Reading is local either \
-                      way.
+                      agree to it for that document; Explain with OpenAI sends \
+                      the document's text the same way. Pick On this Mac and \
+                      Apple's on-device model answers questions here instead — \
+                      nothing leaves, no key, and the explanation is the one \
+                      this app assembles itself. Reading is local either way.
                       """,
               picksTier: true),
     ]

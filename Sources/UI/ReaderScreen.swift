@@ -32,8 +32,10 @@ public struct ReaderScreen: View {
 
     /// The tier chosen at first run, and the same store `OnboardingScreen`
     /// writes. Read here because this is where it has to take effect: a reader
-    /// who answered "on this Mac" and is then handed a cloud ask panel was not
-    /// actually asked anything.
+    /// who answered "on this Mac" and is then handed a cloud ask panel — or an
+    /// Explain with OpenAI button — was not actually asked anything. Both legs
+    /// go through `ReaderModel.honour`, so neither can be offered under
+    /// `.local` without the other noticing.
     @AppStorage("readingTier") private var tier = OnboardingScreen.Tier.preferred
 
     public init() {}
@@ -433,6 +435,12 @@ public struct ReaderScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let doc = model.doc {
+                    // What the document is comes before the box for asking
+                    // about it: the reader's first question is answered by the
+                    // explanation often enough that showing the input first
+                    // would be asking them to think of a question they no
+                    // longer have.
+                    if let explanation = model.explanation { explanationBlock(explanation) }
                     askBlock
                     if doc.isForm { fieldsBlock(doc) }
                     findingsBlock(doc)
@@ -652,6 +660,157 @@ public struct ReaderScreen: View {
         .padding(18)
     }
 
+    /// What the document is, in plain language.
+    ///
+    /// Always present, because it is assembled locally with no model call
+    /// (**I6**). The cloud leg is offered *underneath* it and can only replace
+    /// it with something better — never with nothing.
+    private func explanationBlock(_ explanation: Explanation) -> some View {
+        let byModel = explanation.source == .model
+        // Written text is weighted heavier than read text, so the reader can see
+        // at a glance which sentences a model produced and which the machine
+        // assembled. The icon and the citation carry the same fact twice, in two
+        // channels, because this is the one distinction the page cannot afford
+        // to leave ambiguous.
+        let prose = Font.body(byModel ? 14 : 13.5, byModel ? .semibold : .regular)
+
+        return VStack(alignment: .leading, spacing: 0) {
+            // Provider citation, on top, before a word of its output.
+            HStack(spacing: 6) {
+                Image(systemName: byModel ? "brain.head.profile" : "desktopcomputer")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(byModel ? Ink.accent700 : Ink.neutral600)
+                Text(explanation.provider)
+                    .font(.mono(10)).tracking(0.4).textCase(.uppercase)
+                    .foregroundStyle(byModel ? Ink.accent700 : Ink.neutral600)
+                Spacer(minLength: 0)
+                if let confidence = Confidence.compose(explanation.signals) {
+                    ConfidenceRing(confidence)
+                }
+            }
+            .padding(.bottom, 2)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("What this is")
+                    .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
+                    .foregroundStyle(Ink.accent700)
+                Spacer(minLength: 0)
+            }
+            .padding(.bottom, 6)
+
+            // The ring above scores the *reading*, not the writing. Said plainly,
+            // because a ring beside a model's prose invites exactly the wrong
+            // reading of what was measured.
+            if Confidence.compose(explanation.signals) != nil {
+                Text(byModel
+                     ? "The ring rates how well the text underneath was read, not how sure the model sounds."
+                     : "The ring rates how well this document was read.")
+                    .font(.body(10.5)).foregroundStyle(Ink.neutral600)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.bottom, 8)
+            }
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(explanation.whatItIs)
+                        .font(prose).foregroundStyle(Ink.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 10)
+
+                    VStack(alignment: .leading, spacing: 7) {
+                        ForEach(Array(explanation.summary.enumerated()), id: \.offset) { _, line in
+                            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                Text("·").font(.body(12)).foregroundStyle(Ink.accent400)
+                                Text(line)
+                                    .font(prose).foregroundStyle(byModel ? Ink.text : Ink.neutral700)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+
+                    if !explanation.nextSteps.isEmpty {
+                        Text("Next")
+                            .font(.body(10.5)).tracking(0.5).textCase(.uppercase)
+                            .foregroundStyle(Ink.neutral600)
+                            .padding(.top, 12).padding(.bottom, 4)
+                        VStack(alignment: .leading, spacing: 5) {
+                            ForEach(Array(explanation.nextSteps.enumerated()), id: \.offset) { index, step in
+                                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                    Text("\(index + 1).")
+                                        .font(.mono(11)).foregroundStyle(Ink.neutral600)
+                                    Text(step)
+                                        .font(prose).foregroundStyle(Ink.text)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 4)
+            }
+            // Long by design now, so it scrolls rather than pushing the findings
+            // off the rail.
+            .frame(maxHeight: 340)
+
+            // Every degraded result says so. A quietly worse answer is the one
+            // failure mode this product cannot afford.
+            if let note = explanation.note {
+                Text(note)
+                    .font(.body(11.5)).foregroundStyle(Ink.band(.amber))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+            }
+
+            cloudButton(explanation)
+        }
+        .padding(18)
+    }
+
+    /// The consent moment, in cloud tier.
+    ///
+    /// The grant is taken for the whole document at the point of asking
+    /// (`project-overview.md` §4.1), so the button has to say what leaves before
+    /// it is pressed — and nothing is sent until it is. With no key configured
+    /// there is no button at all, only the reason.
+    @ViewBuilder private func cloudButton(_ explanation: Explanation) -> some View {
+        if tier == .local {
+            // The reader said nothing should leave. The locally-assembled
+            // reading above is what they get, and there is no button to press
+            // that would contradict the answer they already gave.
+            Text("You chose to keep this on your Mac, so nothing is sent. This reading is local.")
+                .font(.body(11.5)).foregroundStyle(Ink.neutral600)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+        } else if model.cloud == nil {
+            Text("No API key set, so nothing can be sent. This reading is local.")
+                .font(.body(11.5)).foregroundStyle(Ink.neutral600)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+        } else if explanation.source == .model {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    Task { await model.explainWithCloud() }
+                } label: {
+                    Text(model.asking ? "Sending…" : "Explain with OpenAI")
+                        .font(.heading(12)).tracking(1.1).textCase(.uppercase)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
+                        .background(model.asking ? Ink.neutral300 : Ink.accent)
+                        .foregroundStyle(Ink.bg)
+                }
+                .buttonStyle(.flat)
+                .disabled(model.asking)
+
+                Text("Sends the text it read and the values it recognised. Never the file, its name, or its images.")
+                    .font(.body(11)).foregroundStyle(Ink.neutral600)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 12)
+        }
+    }
+
     /// The values worth reading, each with the words it came from.
     ///
     /// No confidence ring yet — that is slice 3.2, and `architecture.md` §12 is
@@ -858,6 +1017,34 @@ public struct ReaderScreen: View {
                     Text("Reading was local. Only the pages listed above were sent, and only as text.")
                         .font(.body(10.5)).foregroundStyle(Ink.neutral600)
                         .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            // **I4 requires the breakdown, not just the band.** The explanation
+            // carries two kinds of signal and they are not interchangeable: how
+            // well the pages under the summary were actually read, and what the
+            // model said about its own work. Rendering them as one list of
+            // percentages would imply the second one counted. It never does —
+            // `Confidence.compose` returns nil when the model's self-report is
+            // all there is — so the label says so where the number is.
+            if let explanation = model.explanation, !explanation.signals.isEmpty {
+                Rectangle().fill(Ink.divider).frame(height: 1)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Explanation confidence:")
+                        .font(.body(11.5)).foregroundStyle(Ink.neutral700)
+                    ForEach(explanation.signals, id: \.name) { signal in
+                        HStack(alignment: .top, spacing: 8) {
+                            Text(signal.name == Signal.model
+                                 ? "model self-rating · not used for the band"
+                                 : signal.name)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .foregroundStyle(signal.name == Signal.model ? Ink.neutral600 : Ink.accent700)
+                            Text("\(Int((signal.value * 100).rounded()))%")
+                                .foregroundStyle(Ink.neutral700)
+                        }
+                        .font(.mono(10.5))
+                    }
                 }
             }
         }

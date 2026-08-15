@@ -405,6 +405,7 @@ public enum Limits {
     /// ponytail: a cap, not a design. Largest real document in assets/ is 45
     /// pages. Raise it when something real needs more; never silently exceed it.
     public static let maxPages = 120
+
     /// Pages rendered at once. Bounds peak memory: a 150 dpi US-Letter page is
     /// ~8 MB of bitmap, so 6 in flight is ~50 MB rather than 45 × 8 MB.
     public static let concurrentPages = 6
@@ -560,5 +561,47 @@ public enum ReadFailure: Error, LocalizedError, Equatable {
         case let .noPages(name):
             return "\(name) has no pages to read."
         }
+    }
+}
+
+/// What the document is, in plain language — `architecture.md` §11, tier 1.
+///
+/// Produced two ways and labelled with which: `local` is assembled from findings
+/// with **zero model calls**, `model` came back from the cloud leg. The
+/// distinction is not decoration — **I6** says the local reading survives any
+/// cloud failure, and a reader who cannot tell which one they are looking at has
+/// no way to weigh it.
+public struct Explanation: Sendable, Equatable {
+    public enum Source: String, Sendable { case local, model }
+
+    public let docType: String
+    public let whatItIs: String
+    public let summary: [String]
+    public let urgency: Urgency
+    public let nextSteps: [String]
+    public let source: Source
+    /// Who produced it, named on screen: "OpenAI · gpt-4o-mini", or "This
+    /// machine". A reader deciding how much to trust a paragraph is entitled to
+    /// know what wrote it, and to know without hunting.
+    public let provider: String
+    /// The signals behind this explanation's ring.
+    ///
+    /// **Never the model's self-report alone (I4).** The honest non-model signal
+    /// for a summary is the quality of the text it was built from — a fluent
+    /// paragraph written from a badly OCR'd page is confidently wrong, and that
+    /// is the failure the ring exists to expose. The model's own rating is kept
+    /// as a signal so the inspector can show it, and is never sufficient.
+    public let signals: [Signal]
+    /// Said out loud when something was cut, refused or fell back. Never nil for
+    /// a degraded result — a silent truncation reads as "it read all of it".
+    public let note: String?
+
+    public init(docType: String, whatItIs: String, summary: [String], urgency: Urgency,
+                nextSteps: [String], source: Source, provider: String,
+                signals: [Signal] = [], note: String? = nil) {
+        self.docType = docType; self.whatItIs = whatItIs; self.summary = summary
+        self.urgency = urgency; self.nextSteps = nextSteps
+        self.source = source; self.provider = provider
+        self.signals = signals; self.note = note
     }
 }

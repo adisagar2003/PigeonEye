@@ -253,6 +253,44 @@ public final class ReaderModel {
         answering = false
     }
 
+    // MARK: - Explaining the document
+
+    /// What the document is. Present as soon as one is read, because it is
+    /// assembled locally with no model call — **I6**, and the reason a missing
+    /// key never blanks the screen.
+    public private(set) var explanation: Explanation?
+    public private(set) var asking = false
+
+    /// Send the transcript and the recognised values to the model.
+    ///
+    /// **Nothing here runs on open.** The reader presses a button that says what
+    /// leaves, and that press is the consent — `project-overview.md` §4.1 takes
+    /// the grant for the whole document rather than per crop, and this is where
+    /// it is taken. Any failure returns the local reading with the reason
+    /// attached, never an empty screen (**I6**).
+    ///
+    /// `cloud` is `nil` on the local tier, so this cannot run there — the same
+    /// gate `ask` goes through, for the same reason.
+    public func explainWithCloud() async {
+        guard let doc, let cloud, !asking else { return }
+        let id = requestID
+        asking = true
+
+        // The ledger comes back from `explained` rather than being written
+        // here, because only it knows whether the bytes reached the far end.
+        // Recording egress is not conditional on success: a 500 means the
+        // transcript left this machine, and the inspector saying otherwise is
+        // the one direction this app must never be wrong in.
+        let (result, ledger) = await explained(doc, config: cloud, transport: transport)
+
+        // The same generation check as every other await in this file: a read
+        // started after this one must not be overwritten by its answer.
+        guard requestID == id, self.doc?.url == doc.url else { return }
+        explanation = result
+        sends.append(contentsOf: ledger)
+        asking = false
+    }
+
     public func open(_ url: URL) async {
         // Already read, or already reading. A second pass costs ~15s and cannot
         // return anything different, and because the pane is blanked first, it
@@ -274,14 +312,18 @@ public final class ReaderModel {
         zoom = 1
         selectedField = nil
         selectedFinding = nil
-        // The conversation, the grant and the record of what left all belong to
-        // the document that is going away (**I9**). A grant that outlives its
-        // document is a grant for a document the reader never agreed to send.
+        // The conversation, the grant, the explanation and the record of what
+        // left all belong to the document that is going away (**I9**). A grant
+        // that outlives its document is a grant for a document the reader never
+        // agreed to send, and an explanation that outlives it describes the
+        // wrong file.
         turns = []
         askGranted = false
         askPending = nil
         answering = false
         sends = []
+        explanation = nil
+        asking = false
         // The index's filters belong to it too — a query typed against the last
         // document finds nothing in this one, and reads as a broken search box.
         query = ""
@@ -303,6 +345,9 @@ public final class ReaderModel {
             }
             guard requestID == id else { return }
             doc = document
+            // Local, immediate, no model call. The screen says something true
+            // before anything has been offered the chance to leave the machine.
+            explanation = explain(document)
             phase = .ready
             await loadPageImage()
         } catch let failure as ReadFailure {

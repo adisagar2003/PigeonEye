@@ -135,7 +135,11 @@ private let cutOff = """
     """
 
 /// Whether the bytes reached the far end.
-private enum Sent { case yes, no, unknown }
+///
+/// Shared with `Explained.swift` rather than duplicated: both egress paths owe
+/// the reader the same answer to "did it leave?", and two copies of this
+/// judgement is how they drift into disagreeing.
+enum Sent { case yes, no, unknown }
 
 /// Three answers, not two, because two would force a guess.
 ///
@@ -144,7 +148,7 @@ private enum Sent { case yes, no, unknown }
 /// recorded. Everything else — a dropped connection part-way through a write —
 /// is genuinely unknown, and is reported as unknown rather than rounded down to
 /// "nothing left": under-reporting egress is the dangerous direction here.
-private func sent(_ error: Error) -> Sent {
+func sent(_ error: Error) -> Sent {
     guard let failure = error as? Gate.Failure else { return .unknown }
     if case .promptTooLarge = failure { return .no }
     return failure.afterSending ? .yes : .unknown
@@ -161,7 +165,7 @@ private func ledger(_ pages: [(page: Int, chars: Int)], to host: String, sent: S
     }
 }
 
-private func why(_ error: Error) -> String {
+func why(_ error: Error) -> String {
     (error as? LocalizedError)?.errorDescription
         ?? (error as? URLError).map { _ in "the machine could not reach the API" }
         ?? "the request did not complete"
