@@ -32,8 +32,10 @@ public struct ReaderScreen: View {
 
     /// The tier chosen at first run, and the same store `OnboardingScreen`
     /// writes. Read here because this is where it has to take effect: a reader
-    /// who answered "on this Mac" and is then handed a cloud ask panel was not
-    /// actually asked anything.
+    /// who answered "on this Mac" and is then handed a cloud ask panel — or an
+    /// Explain with OpenAI button — was not actually asked anything. Both legs
+    /// go through `ReaderModel.honour`, so neither can be offered under
+    /// `.local` without the other noticing.
     @AppStorage("readingTier") private var tier = OnboardingScreen.Tier.preferred
 
     public init() {}
@@ -772,7 +774,15 @@ public struct ReaderScreen: View {
     /// it is pressed — and nothing is sent until it is. With no key configured
     /// there is no button at all, only the reason.
     @ViewBuilder private func cloudButton(_ explanation: Explanation) -> some View {
-        if model.cloud == nil {
+        if tier == .local {
+            // The reader said nothing should leave. The locally-assembled
+            // reading above is what they get, and there is no button to press
+            // that would contradict the answer they already gave.
+            Text("You chose to keep this on your Mac, so nothing is sent. This reading is local.")
+                .font(.body(11.5)).foregroundStyle(Ink.neutral600)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 10)
+        } else if model.cloud == nil {
             Text("No API key set, so nothing can be sent. This reading is local.")
                 .font(.body(11.5)).foregroundStyle(Ink.neutral600)
                 .fixedSize(horizontal: false, vertical: true)

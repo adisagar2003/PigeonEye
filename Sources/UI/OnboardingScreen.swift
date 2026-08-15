@@ -22,16 +22,22 @@ public struct OnboardingScreen: View {
         var picksTier = false
     }
 
-    /// Which tier does the reasoning — `architecture.md` §6, and the row in §5
-    /// that decided "cloud for the demo, local where hardware allows".
+    /// Which tier does the reasoning — `architecture.md` §6, Boundary C, and the
+    /// row in §5 that decided "cloud for the demo, local where hardware allows".
     ///
     /// **This is now load-bearing rather than recorded.** `ReaderModel.honour`
-    /// reads it, and it decides whether a question is answered on this Mac or
-    /// sent to an endpoint. A preference nothing consults is a setting that
-    /// lies, and this one used to be exactly that.
+    /// reads it, and it decides both whether a question is answered on this Mac
+    /// or sent to an endpoint, and whether the Explain with OpenAI button is
+    /// offered at all. A preference nothing consults is a setting that lies, and
+    /// this one used to be exactly that.
     ///
-    /// ponytail: lives in UI because UI is where it is picked. It moves down to
-    /// `Contracts` if a lower layer ever needs to branch on it.
+    /// It stays in UI rather than moving to `Contracts`, because the Gate does
+    /// not read it — UI reads it and decides whether to call the Gate. Nothing
+    /// below layer 4 has an opinion about which tier a person picked.
+    ///
+    /// **Asking** on `.local` is answered on-device and nothing leaves.
+    /// **Explaining** on `.local` is the locally-assembled explanation and
+    /// nothing more — no on-device prose yet, which is slice 4.3.
     public enum Tier: String, CaseIterable, Identifiable, Sendable {
         case openAI
         case local
