@@ -45,9 +45,30 @@ public struct Document: Sendable {
     /// user the other 50 (`features/01-read-it-locally.md` §7), and it must not
     /// pass silently either — `project-overview.md` §9.
     public let failedPages: [Int]
+    /// Every fillable field the file declares, in page order. Empty for a
+    /// document that is not a form — which is the mode test itself.
+    public let fields: [Field]
+    /// Deterministic findings, in page order. Every one carries a quote that is
+    /// a verbatim substring of `transcript` (**I2**), enforced at the single
+    /// construction point in `Tools`.
+    public let findings: [Finding]
     public let log: [Step]
 
     public var fileName: String { url.lastPathComponent }
+
+    /// Form mode. Decided by the file, not by a guess (`project-overview.md` §6):
+    /// a single `Widget` annotation anywhere makes this a form.
+    public var isForm: Bool { !fields.isEmpty }
+
+    /// The last page the reader can actually show.
+    ///
+    /// Normally `pagesRead`, but the field list is read from the *whole* file
+    /// while OCR stops at `Limits.maxPages` — so a 200-page form can list a
+    /// field on page 150. Rasterising that page needs no OCR, so listing a field
+    /// the user then cannot open would be the app lying about its own list.
+    public var navigablePageCount: Int {
+        max(pagesRead, fields.map(\.page).max() ?? 0)
+    }
 
     /// **I5** — rendered unconditionally, never behind a disclosure.
     public var pagesReadLine: String {
@@ -94,6 +115,14 @@ public func read(
     note("open · \(total) page\(total == 1 ? "" : "s") · \(kind == .pdf ? "pdf" : "image")")
     if capped {
         note("page cap \(Limits.maxPages) · reading \(toRead) of \(total)", .flag)
+    }
+
+    // Before any rasterising: the widget list is cheap, and it decides the mode.
+    // Counts only in the log — a field name is document text (§5.2).
+    let fields = kind == .pdf ? try formFields(pdf: url) : []
+    if !fields.isEmpty {
+        let pagesWithFields = Set(fields.map(\.page)).count
+        note("form · \(fields.count) widgets on \(pagesWithFields) page\(pagesWithFields == 1 ? "" : "s")")
     }
 
     var pages = [Page?](repeating: nil, count: toRead)
@@ -161,10 +190,23 @@ public func read(
     if !blank.isEmpty {
         note("no text on \(blank.count) page\(blank.count == 1 ? "" : "s")", .flag)
     }
+    // Deterministic only — validators and data detectors, no model. Sequential
+    // because it is pure string work over pages already in memory; the cost is
+    // milliseconds next to the OCR that produced them.
+    var found: [Finding] = []
+    for (index, page) in read.enumerated() {
+        found += await findings(on: page, number: index + 1)
+    }
+    if !found.isEmpty {
+        let validated = found.count { $0.validated == true }
+        note("findings · \(found.count) · \(validated) validated")
+    }
+
     note("network calls: 0")
 
     return Document(url: url, kind: kind, pageCount: total, pagesRead: toRead,
-                    capped: capped, pages: read, failedPages: failed, log: log)
+                    capped: capped, pages: read, failedPages: failed,
+                    fields: fields, findings: found, log: log)
 }
 
 /// "2", "2 and 7", "2, 7 and 9" — page numbers are the one document-derived

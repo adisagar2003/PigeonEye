@@ -114,6 +114,19 @@ public struct ReaderScreen: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Sits over the page rather than in the toolbar, because the toolbar
+        // only exists once a document is open and this has to be sayable while
+        // one is still being read.
+        .overlay(alignment: .bottom) {
+            if let notice = model.notice {
+                Text(notice)
+                    .font(.body(12)).foregroundStyle(Ink.accent900)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Ink.accent200)
+                    .overlay(Rectangle().stroke(Ink.accent400, lineWidth: 1))
+                    .padding(.bottom, 24)
+            }
+        }
     }
 
     private func toolbar(_ doc: Document) -> some View {
@@ -139,6 +152,19 @@ public struct ReaderScreen: View {
                     .fixedSize()
             }
 
+            // The mode, on screen. `project-overview.md` §6 — the mode is decided
+            // by the file, not by a guess, and the user has no way to know that
+            // unless the answer is visible next to the document.
+            Text(doc.isForm ? "form · \(doc.fields.count) fields" : "document")
+                .font(.body(10.5)).tracking(0.5).textCase(.uppercase)
+                .foregroundStyle(doc.isForm ? Ink.accent700 : Ink.neutral700)
+                .padding(.horizontal, 7).padding(.vertical, 1)
+                .overlay(Rectangle().stroke(doc.isForm ? Ink.accent400 : Ink.neutral400, lineWidth: 1))
+                .fixedSize()
+                .help(doc.isForm
+                      ? "This file declares fillable fields, so they are read from it directly."
+                      : "No fillable fields in this file.")
+
             // A damaged page is reported next to the pages-read chip, not only
             // in the inspector log: the consumer has to know a page is missing
             // from what they are reading (`features/01-read-it-locally.md` §7).
@@ -161,7 +187,7 @@ public struct ReaderScreen: View {
             Spacer()
 
             step("‹", .leftArrow, "⌘←") { model.step(-1) }
-            Text("page \(model.page) / \(doc.pagesRead)")
+            Text("page \(model.page) / \(doc.navigablePageCount)")
                 .font(.body(11.5)).monospacedDigit()
                 .foregroundStyle(Ink.neutral700).frame(minWidth: 78)
             step("›", .rightArrow, "⌘→") { model.step(1) }
@@ -214,6 +240,7 @@ public struct ReaderScreen: View {
                         .resizable().aspectRatio(contentMode: .fit)
                         .frame(width: 720 * model.zoom)
                         .background(.white)
+                        .overlay(alignment: .topLeading) { fieldHighlight }
                         .blueprint(stroke: Ink.neutral500)
                         .shadow(color: Ink.neutral900.opacity(0.16), radius: 5, y: 3)
                 } else {
@@ -222,6 +249,46 @@ public struct ReaderScreen: View {
             }
             .padding(26)
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// What the overlay draws on the page currently shown: a selected field's
+    /// rect, or the line a selected finding was quoted from. Both are `Region`s
+    /// in the one origin, which is why one overlay serves both (**I12**).
+    private var highlightedRegion: Region? {
+        if let field = model.selectedField, field.isDrawable, field.page == model.page {
+            return field.region
+        }
+        if let found = model.selectedFinding, found.page == model.page,
+           let region = found.region, region.width > 0, region.height > 0 {
+            return region
+        }
+        return nil
+    }
+
+    /// The selected region, drawn over the rendered page.
+    ///
+    /// `Field.region` is normalised against the page, and the raster fills this
+    /// overlay exactly, so the region multiplies straight through the geometry —
+    /// no second coordinate conversion, which is the point of doing the flip
+    /// once in `Tools` (**I12**).
+    @ViewBuilder private var fieldHighlight: some View {
+        if let region = highlightedRegion {
+            GeometryReader { geo in
+                Rectangle()
+                    .fill(Ink.accent.opacity(0.16))
+                    .overlay(Rectangle().stroke(Ink.accent, lineWidth: 1.5))
+                    .frame(width: region.width * geo.size.width,
+                           height: region.height * geo.size.height)
+                    .offset(x: region.x * geo.size.width,
+                            y: region.y * geo.size.height)
+            }
+            // Overlays are not clipped to what they overlay. A widget whose rect
+            // sits off-page would otherwise stroke over the pane background
+            // instead of the paper — the second half of the off-page stress case,
+            // where `isDrawable` covers the zero-sized half.
+            .clipped()
+            .allowsHitTesting(false)
         }
     }
 
@@ -292,6 +359,8 @@ public struct ReaderScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 if let doc = model.doc {
+                    if doc.isForm { fieldsBlock(doc) }
+                    findingsBlock(doc)
                     transcriptBlock(doc)
                     if model.inspectorOpen { inspectorBlock(doc) }
                 } else {
@@ -307,6 +376,109 @@ public struct ReaderScreen: View {
         .background(Ink.bg)
     }
 
+    /// The fields the user must fill, read straight out of the file.
+    ///
+    /// No confidence ring, deliberately: `architecture.md` §9.1 — these are exact
+    /// by construction and **I3** does not apply to them. A ring here would
+    /// claim there is something to be uncertain about.
+    private func fieldsBlock(_ doc: Document) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("Fields to fill")
+                .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
+                .foregroundStyle(Ink.accent700)
+                .padding(.bottom, 2)
+            Text("\(doc.fields.count) read from the file — nothing inferred")
+                .font(.body(12)).foregroundStyle(Ink.neutral600)
+                .padding(.bottom, 10)
+
+            // Lazy because CPA-1200 is 105 rows and the F1 second pass already
+            // learned what a non-lazy list of that size does to the window.
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(doc.fields.enumerated()), id: \.offset) { _, field in
+                        Button { model.select(field) } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text(field.name.isEmpty ? "— unnamed field —" : field.name)
+                                    .font(.mono(11.5))
+                                    .foregroundStyle(Ink.text)
+                                    .lineLimit(2).truncationMode(.head)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Text("p\(field.page)")
+                                    .font(.mono(11)).foregroundStyle(Ink.neutral600)
+                            }
+                            .padding(.vertical, 5).padding(.horizontal, 8)
+                            .background(model.selectedField == field ? Ink.accent100 : Color.clear)
+                        }
+                        .buttonStyle(.flat)
+                    }
+                }
+            }
+            .frame(maxHeight: 320)
+            .blueprint(stroke: Ink.divider)
+        }
+        .padding(18)
+    }
+
+    /// The values worth reading, each with the words it came from.
+    ///
+    /// No confidence ring yet — that is slice 3.2, and `architecture.md` §12 is
+    /// explicit that a number rendered before it is composed from real signals
+    /// is decoration with a number painted on it. The quote is shown instead,
+    /// because that is the claim this slice can actually stand behind (**I2**).
+    private func findingsBlock(_ doc: Document) -> some View {
+        let onPage = doc.findings.filter { $0.page == model.page }
+
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("What it found")
+                .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
+                .foregroundStyle(Ink.accent700)
+                .padding(.bottom, 2)
+            Text("\(doc.findings.count) on this document · \(onPage.count) on page \(model.page)")
+                .font(.body(12)).foregroundStyle(Ink.neutral600)
+                .padding(.bottom, 10)
+
+            if onPage.isEmpty {
+                // The completeness rule: a page with nothing on it says so.
+                // A blank panel reads as a failure to run (`project-overview.md` §9).
+                Text("Nothing found on page \(model.page).")
+                    .font(.body(12.5)).foregroundStyle(Ink.neutral700)
+                    .padding(.vertical, 8)
+            } else {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(onPage.enumerated()), id: \.offset) { _, found in
+                        Button { model.select(found) } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Text(found.label)
+                                        .font(.body(11)).tracking(0.4).textCase(.uppercase)
+                                        .foregroundStyle(Ink.neutral600)
+                                    Spacer(minLength: 0)
+                                    if found.validated == true {
+                                        Text("checked")
+                                            .font(.mono(9.5)).foregroundStyle(Ink.accent700)
+                                    }
+                                }
+                                Text(found.value ?? "—")
+                                    .font(.mono(13)).foregroundStyle(Ink.text)
+                                // The words it came from. I2 guarantees this is a
+                                // verbatim substring of the transcript.
+                                Text("“\(found.quote)”")
+                                    .font(.body(11.5)).foregroundStyle(Ink.neutral700)
+                                    .lineLimit(2)
+                            }
+                            .padding(.vertical, 7).padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(model.selectedFinding?.id == found.id ? Ink.accent100 : Color.clear)
+                        }
+                        .buttonStyle(.flat)
+                    }
+                }
+                .blueprint(stroke: Ink.divider)
+            }
+        }
+        .padding(18)
+    }
+
     private func transcriptBlock(_ doc: Document) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Button { model.transcriptOpen.toggle() } label: {
@@ -316,8 +488,11 @@ public struct ReaderScreen: View {
                     .overlay(Rectangle().fill(Ink.accent400).frame(height: 1), alignment: .bottom)
             }
             .buttonStyle(.flat)
-            .keyboardShortcut("t")
-            .help("Show the text it read (⌘T)")
+            // ⇧⌘T, not ⌘T. A SwiftUI WindowGroup gets native window tabbing on
+            // macOS, and ⌘T is the system's New Tab — the same collision the
+            // fixture buttons had with ⌘1/⌘2.
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+            .help("Show the text it read (⇧⌘T)")
 
             if model.transcriptOpen {
                 // One `Text` holding the joined transcript is what froze the
@@ -330,8 +505,20 @@ public struct ReaderScreen: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 12) {
                         ForEach(doc.pages.indices, id: \.self) { index in
-                            if !doc.pages[index].transcript.isEmpty {
-                                Text(doc.pages[index].transcript)
+                            let text = doc.pages[index].transcript
+                            if text.isEmpty {
+                                // A page that read as nothing must leave a hole
+                                // you can see. Dropping it silently moves the
+                                // text of page 12 to where page 11 should be,
+                                // and the reader has no way to know
+                                // (`project-overview.md` §9).
+                                Text(doc.failedPages.contains(index + 1)
+                                     ? "— page \(index + 1) could not be read —"
+                                     : "— page \(index + 1): no text on this page —")
+                                    .font(.mono(11)).foregroundStyle(Ink.neutral600)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            } else {
+                                Text(text)
                                     .font(.mono(11)).foregroundStyle(Ink.neutral800)
                                     .textSelection(.enabled)
                                     .frame(maxWidth: .infinity, alignment: .leading)

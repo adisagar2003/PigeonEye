@@ -14,9 +14,20 @@ this file moved to `in progress` before the code and `complete` after.
 
 ## Current phase
 
-**F1 built, reviewed and corrected.** The app opens a PDF or a scan, renders it,
+**F3 slice 3.1 is `in progress`.** F2 slice 2.1 is complete: the mode is decided
+by the file, and a form's field list is read straight out of the AcroForm with
+page and rect (`features/02-form-mode.md`). Slice **2.2** (human labels for
+cryptic IRS field names) is deliberately deferred — see the decision log.
+
+The current row is **3.1 · deterministic findings**
+(`features/03-findings-you-can-trust.md`): format validators and Vision's data
+detectors, each finding carrying value, quote, page, region and origin, with
+**I2**'s substring check at the single construction point. No confidence ring —
+that is 3.2.
+
+F1 is built, reviewed and corrected. The app opens a PDF or a scan, renders it,
 OCRs every page and shows the transcript — locally, with no Gate layer in the
-package at all. 19 tests pass. F2 has not started.
+package at all. 21 tests pass.
 
 A review of the merged F1 found four defects, all of them in behaviour
 `features/01-read-it-locally.md` §7 had already specified and no test covered.
@@ -41,8 +52,8 @@ feature has a spec under `context/features/`. One source of truth, per
 | # | Feature | Spec | Status |
 |---|---|---|---|
 | F1 | Read it locally | [`features/01-read-it-locally.md`](features/01-read-it-locally.md) | **complete** |
-| F2 | Form mode | — | not started |
-| F3 | Findings you can trust | — | not started |
+| F2 | Form mode | [`features/02-form-mode.md`](features/02-form-mode.md) | **partial** — 2.1 complete, 2.2 deferred |
+| F3 | Findings you can trust | [`features/03-findings-you-can-trust.md`](features/03-findings-you-can-trust.md) | **in progress** — 3.1 |
 | F4 | Explain it | — | not started |
 | F5 | Escalate with consent | — | not started |
 | F6 | Fail honestly | — | not started |
@@ -157,6 +168,50 @@ tests in the same slice, not to trust the prose.
 | `./ocr` missing from a fresh clone | Binary is gitignored; every `eval/` caller needed an undocumented copy | Tracked launcher + `scripts/cli-contract.sh` |
 | Zoom did nothing | `delta * 100` inside the sum, so the first click of *either* button clamped to 0.7 and stayed | `Zoom.stepped(from:by:)` in layer 0, one home for the bound and the step |
 
+### F1 second pass — what driving the app found that reading it did not
+
+Every row below came from opening the window and using it. None of them was
+visible in a diff, and none had a test. The F1 lesson repeats one level up:
+**a build that has never been run by hand is not a build that is known to work.**
+
+| Defect | Was | Now |
+|---|---|---|
+| Buttons only clicked on the glyph | `.buttonStyle(.plain)` hit-tests drawn pixels only, so the padding inside a bordered label was dead space | One `Flat` style applying `contentShape(Rectangle())`, used by all seven buttons |
+| The transcript froze the window | One `Text` holding ~130 KB; SwiftUI lays all of it out in a single pass | `LazyVStack` of per-page `Text`s. **Not** a threading fix — text layout cannot leave the main thread, so a background task would have moved the ~1 ms join and kept the freeze |
+| Re-opening the open document re-read it | ~15s, a blanked pane, identical bytes — reachable from one keystroke | `open` latches on **path + modification date**; a re-save is still re-read, an identical request is declined *and says so on screen* |
+| ⌘1/⌘2 stole the platform's tab shortcut | Fixture buttons bound to ⌘1/⌘2; a reflex keystroke replaced the open document with a demo one | Fixture buttons have no shortcut. Transcript moved to ⇧⌘T for the same reason — `WindowGroup` gets native tabbing, and ⌘T is New Tab |
+| A blank page vanished from the transcript | Empty page transcripts rendered as nothing, so the text of page 12 appeared where page 11 should be | An explicit `— page N could not be read —` marker, distinct from `no text on this page` |
+
+**"Bad scan" was not a bad scan, and the seal misread is not scan damage.** The
+button opened `assets/scans/007969-00242-20170111-01.jpg`, which is a clean
+digital render. The `WEAL PROTECTED` reading at conf 0.062–0.08 recorded above
+is real, but it comes from the **circular seal** — curved text on a logo — and
+would happen on a pristine file. It is not evidence about degradation, and the
+test named `ocr_reads_a_degraded_scan` was running against that clean page, so
+it asserted nothing about degradation and was green for the wrong reason.
+
+Measured on the real thing, `assets/scans/007969-00186-20080911-01.jpg` — a
+photocopy with speckle, skew, a `SEP 11 2008` stamp and handwritten annotations:
+
+| | |
+|---|---|
+| Lines read | **36** |
+| Mean confidence | **0.562** (the clean page: 0.627) |
+| Below `Thresholds.escalate` (0.45) | **6 lines** |
+| Seal fragments | `ANTED STATES` 0.34, `AGENO%` 0.26, `VIAL PROTECAND` 0.26 |
+| Date misread | `9/11/2008` → `9/11/2098` — a plausible wrong answer, which is the dangerous kind |
+
+`ocr_reads_a_degraded_scan` now runs against the degraded photocopy rather than
+the clean render: degradation is not uniform down a document, and one good page
+proves nothing about the confidence reading on page 39. It asserts floors (≥25
+lines, mean < 0.60, at least one line below the escalate threshold) and fails
+against the clean page — verified by pointing it back and watching mean 0.627
+break the assertion.
+
+`eval/cases.json`, `eval/score.py` and `Fixture.cleanPage` still use the clean
+page deliberately: it is the fast one-page image for tests whose subject is not
+degradation, and the eval ground truth is tied to it.
+
 **The Vision crash is Apple's, and the bound belongs in `Tools.ocr`.** The
 intermittent segfault recorded earlier now has a stack: `EXC_BAD_ACCESS` in
 `objc_release` inside **TextRecognition**, unwinding a finished request — a
@@ -169,6 +224,14 @@ already bounded itself to `Limits.concurrentPages`, and two concurrent reads
 still put twice that in flight. Per-caller bounds compose into no bound. Measured
 after: `swift test` went from crashing roughly 1 run in 3 to 4 consecutive clean
 runs, wall clock unchanged at ~24s.
+
+**Still open: the gate reduces it, it does not close it.** `swift run PigeonEye`
+segfaulted again with `VisionGate` in place — same stack, `objc_release` inside
+**TextRecognition** on `com.apple.root.user-initiated-qos.cooperative`
+(`PigeonEye-2026-08-14-190451.ips`). The gate bounds concurrency; the race is
+inside a single request's teardown, so bounding cannot remove it. Treat the
+"4 consecutive clean runs" number as a reduction in frequency, not a fix, and
+do not let F2 assume OCR cannot take the process down.
 
 ### OCR — Apple Vision is the local tier
 
@@ -227,8 +290,30 @@ One gap: field *names* vary. NRCS ships human-readable ones ("Application
 Date"); IRS ships `topmostSubform[0].Page1[0].f1_04[0]`. IRS-style forms need
 **label resolution** — for each widget rect, find the nearest printed text (left,
 then above) from the OCR pass. Geometry, not inference. It's the only place form
-mode needs OCR at all, and `assets/golden/funsd/` has 50 test forms of ground
-truth for it.
+mode needs OCR at all. That is slice 2.2, deferred.
+
+**What building 2.1 added to those numbers.** Two things the recorded counts hid,
+both found by writing the tests rather than by reading the spike output:
+
+- **A widget is not a field.** Schedule F is **89 widgets across 84 fields** —
+  five checkbox pairs, where `c1_2[0]` and `c1_2[1]` are the two boxes of one
+  yes/no and PDFKit puts the index inside `fieldName`. The first version of
+  `checkbox_groups_keep_every_member` asserted that a pair *shares* a name and
+  failed: 89 distinct names over 89 widgets. Listing per field would drop one box
+  of every pair, invisibly. The list is per widget, and the test asserts 84
+  against the name with its trailing index stripped.
+- **CPA-1200 carries 3 `Link` annotations** as well as its 105 widgets, so
+  filtering on `type == "Widget"` is load-bearing rather than defensive.
+
+Cost: reading the widget list is ~40 ms on the 45-page EPA label — cheap enough
+to run before rasterising, so the mode is known before any page is rendered.
+
+**2.2's measurement, decided and not yet taken:** label accuracy is the OCR
+confidence of the line each label came from, aggregated over the resolved fields
+— not the FUNSD harness this section originally named. FUNSD pages carry no
+AcroForm widgets, so scoring against them needs a rig that fabricates
+pseudo-widgets from FUNSD's annotation boxes; that is a slice of its own, and the
+`ocr_bench.py` corpus globbing would need rewriting with it.
 
 ### Local reasoning — need much less of it than assumed
 
@@ -483,6 +568,14 @@ median 0.606, max 0.885, 377 distinct values. Note the asymmetry in
 | **The root is an allowlist, checked by `scripts/layers.sh`** — a root file has no directory, so no layer, so no import rule. Code with a layer goes in `Sources/`, prototypes in `spikes/`, and every spike header names the slice that deletes it | yours, enforced by mine |
 | **`eval/` stays Python and stays at the root level** — it is measurement, not a layer, and `assets/golden/` + the four metrics have no Swift equivalent worth writing | mine |
 | **Vision request concurrency is bounded in `Tools.ocr`, process-wide** — Apple's TextRecognition crashes releasing a finished request; per-caller bounds compose into no bound | measurement |
+| **I2 is enforced at one construction point in `Tools`, not per caller** — a caller cannot invent a quote because a caller cannot build a `Finding` any other way. A quote absent from the transcript yields nil rather than throwing, so one bad line does not cost the page its other findings | mine |
+| **Search patterns are looser than validation patterns** — one pattern for both drops `10.5 0Z` (OCR for `10.5 oz`) entirely, so the user is never told the rate exists. Find it and fail it; discarding it is the app deciding for the reader | mine, from the F3 review |
+| **`Finding` is `Encodable` with a `package` initialiser** — a public init or a synthesised `Decodable` is a second way in with no transcript to check against, which would make I2 a comment rather than a rule | mine, from the F3 review |
+| **Validators whole-match rather than contain** — `R G-2 26-O4871` is a real Vision misread from this corpus, and a containment check passes it the moment any fragment looks like a registration number | measurement |
+| **A finding's region is its whole line**, not the matched words — Vision returns per-line boxes and word boxes need a second request. Carried as a `ponytail:` ceiling; F5 crops this region so a tighter box is an upgrade | mine |
+| **Form fields get their own layer-0 type, `Field`, not a `Finding`** — `Finding.quote` is non-optional and I2 asserts it is a verbatim substring of the transcript; a widget has no quote, and bending it would make slice 3.1's substring check special-case `acroform` | yours |
+| **F2 ships as 2.1 alone; 2.2 (label resolution) is deferred** — F2 is a leaf that unblocks nothing, `issues.md`'s own cut order puts 2.2 third, and the demo beat works with raw IRS names | yours |
+| **2.2's accuracy will be measured as the OCR confidence of the line each label came from**, not against `assets/golden/funsd/` — FUNSD pages have no widgets, so scoring there needs a pseudo-widget rig that is a slice of its own | yours |
 | **`Document` reports `failedPages` and reads on** — a damaged page costs that page, never the document | consequence of the F1 review |
 | **Zoom bound and step live in `Contracts.Zoom`** — the bug was the toolbar's step and the model's arithmetic disagreeing | consequence of the F1 review |
 | **Boundary A is deterministic and document-stateless, but not freely parallelisable** — the process-wide Vision gate is part of the contract, so a future caller cannot fan out and rediscover the crash | consequence of the PR #9 review |

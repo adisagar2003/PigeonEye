@@ -37,6 +37,74 @@ public struct Region: Codable, Sendable, Equatable {
     }
 }
 
+/// A deterministic shape a value can be checked against.
+///
+/// The rule lives here; the regex that implements it lives in `Tools`
+/// (`coding-standards.md` §1 — validation is split exactly one way). These are
+/// the highest-trust signal in the composite: `524-529` validates and
+/// `R G-2 26-O4871` does not, with no model involved (`architecture.md` §12).
+public enum Format: String, Codable, Sendable, CaseIterable {
+    case epaRegistration
+    case duration
+    case date
+    case amount
+    case formNumber
+    case rate
+
+    /// What a finding of this shape is called on screen (§11 — `label` is named
+    /// per document, and these are the names this corpus uses).
+    public var label: String {
+        switch self {
+        case .epaRegistration: "EPA reg. no."
+        case .duration: "Time window"
+        case .date: "Date"
+        case .amount: "Amount"
+        case .formNumber: "Form no."
+        case .rate: "Application rate"
+        }
+    }
+}
+
+/// One fillable field, read from the file's AcroForm rather than inferred.
+///
+/// Carries no confidence and never will: `architecture.md` §9.1 — form fields
+/// are ground truth from the file, exact by construction, so **I3** does not
+/// apply to them. That is the whole reason form mode is worth having.
+public struct Field: Codable, Sendable, Equatable {
+    /// The raw AcroForm field name. IRS ships XFA paths
+    /// (`topmostSubform[0].Page1[0].f1_04[0]`), NRCS ships readable ones
+    /// (`Application Date`). Slice 2.2 resolves the first kind; until then this
+    /// is what the user sees.
+    public let name: String
+    /// `PDFAnnotation.widgetFieldType` — `/Tx`, `/Btn`, `/Ch`, `/Sig`.
+    public let kind: String
+    /// 1-based, so `Document.pages[field.page - 1]` is this field's page.
+    public let page: Int
+    /// Normalised, upper-left — the same origin `Line.bbox` uses (**I12**).
+    public let region: Region
+
+    public init(name: String, kind: String, page: Int, region: Region) {
+        self.name = name; self.kind = kind; self.page = page; self.region = region
+    }
+
+    /// Whether the overlay has a rect worth stroking. A widget with a zero-sized
+    /// or off-page rect is still a field the user must fill, so it stays in the
+    /// list — it just isn't drawn.
+    ///
+    /// "Off-page" is the half that is easy to miss: a rect wholly outside the
+    /// media box has positive width and height, so a size check alone calls it
+    /// drawable and the overlay points at nothing.
+    public var isDrawable: Bool {
+        guard region.x.isFinite, region.y.isFinite,
+              region.width.isFinite, region.height.isFinite,
+              region.width > 0, region.height > 0
+        else { return false }
+        // Overlaps the page at all, rather than sitting entirely off one edge.
+        return region.x < 1 && region.y < 1
+            && region.x + region.width > 0 && region.y + region.height > 0
+    }
+}
+
 /// One page, read. Text only — page images are rendered on demand and
 /// discarded, so a 45-page document does not hold 45 bitmaps.
 public struct Page: Codable, Sendable {
@@ -80,7 +148,16 @@ public struct Signal: Codable, Sendable {
     public init(_ name: String, _ value: Double) { self.name = name; self.value = value }
 }
 
-public struct Finding: Codable, Sendable, Identifiable {
+/// One value the reader is willing to show, and the words it came from.
+///
+/// **Encodable, not Codable, and its initialiser is `package`, both on purpose.**
+/// **I2** says every rendered value traces to a verbatim substring of the
+/// transcript, and that is enforced at one construction point in `Tools`. A
+/// public initialiser — or a synthesised `Decodable` — is a second way in that
+/// has no transcript to check against, which would make the guarantee a comment
+/// rather than a rule. Decoding comes back when there is an import path that
+/// carries the transcript with it.
+public struct Finding: Encodable, Sendable, Identifiable {
     public let id: String
     public let label: String
     /// `nil` when present-but-unreadable.
@@ -98,9 +175,11 @@ public struct Finding: Codable, Sendable, Identifiable {
     public let signals: [Signal]
     public let unresolved: Bool
 
-    public init(id: String, label: String, value: String?, conf: Double, quote: String,
-                page: Int, region: Region? = nil, validated: Bool? = nil,
-                origin: Origin, signals: [Signal] = [], unresolved: Bool = false) {
+    /// `package`, so `Tools.finding(…)` stays the only way a `Finding` comes
+    /// into existence and **I2**'s substring check cannot be walked around.
+    package init(id: String, label: String, value: String?, conf: Double, quote: String,
+                 page: Int, region: Region? = nil, validated: Bool? = nil,
+                 origin: Origin, signals: [Signal] = [], unresolved: Bool = false) {
         self.id = id; self.label = label; self.value = value; self.conf = conf
         self.quote = quote; self.page = page; self.region = region
         self.validated = validated; self.origin = origin; self.signals = signals

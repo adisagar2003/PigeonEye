@@ -63,6 +63,15 @@ the stray file. `ocr.swift`'s layer-1 exemption was the last one granted; it
 died when the file became `Sources/Tools/OCR.swift` in F1, and no replacement
 grace exists.
 
+`Sources/PigeonEye/PigeonEyeApp.swift` is the **second and last exemption to the
+SwiftUI grep**, and unlike the first one it is permanent. `@main` has to name a
+`Scene`, and a `Scene` is a SwiftUI type — there is no way to declare an entry
+point without importing the framework. It stays a shim: an `App`, a
+`WindowGroup`, and the activation-policy call a SwiftPM executable needs. Any
+view logic that appears in it belongs in `Sources/UI/`. Written down because a
+boundary check with an undocumented permanent failure is a check people stop
+running.
+
 Validation is split on purpose and only one way: **rules and result types in
 Contracts, the deterministic implementations in Tools.** Agent and UI consume the
 shared result types and never re-implement a check.
