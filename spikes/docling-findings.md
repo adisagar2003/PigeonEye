@@ -43,6 +43,49 @@ Vision's 9/186 differs from the tracker's 1/186 because this rasterised with
 `pdftoppm` rather than the app's PDFKit render — 167 lines read where the app's
 path read 55. Different rasteriser, same verdict.
 
+## Row integrity — the number recall cannot see
+
+Numeric recall is a multiset and so is blind to *attachment*: it says the token
+`1.6` survived, never that `1.6` survived as the broadcast rate **for Hornbeam**.
+On a rate table that is the whole product, because a rate attached to the wrong
+species is a confident wrong answer, and those are worse than missing ones.
+
+`spikes/row_integrity.py` scores it: a row is kept only if the hypothesis has a
+line for that species carrying the same numbers in the same order. Ground truth
+is `pdftotext -layout`, which scores 100% against itself.
+
+| Page | rows | PDFKit text layer | Apple Vision | Docling |
+|---|---|---|---|---|
+| EPA `000524-00529` p34 | 55 | **100%** | 0% | 76.4% |
+| EPA `000524-00529` p32 | 43 | 97.7% | 4.7% | not run |
+| `007969-00186` p1 | 11 | **100%** | 81.8% | not run |
+| NRCS CPA-1200 p1 | 4 | **100%** | 75% | not run |
+
+**This is the finding that changes the recommendation.** Docling scores 99.5% on
+numeric recall and **76.4%** on row integrity — 13 of 55 rows misattributed. It
+merges adjacent table rows:
+
+```
+docling:  | Russian olive* Sage, black | 1.6-4 | 0.8-1.6 0.8 |
+truth:      Russian olive*   1.6-4     0.8-1.6
+            Sage, black      1.6-3.2   0.8
+```
+
+`Sage, black` loses its broadcast rate `1.6-3.2` and inherits `1.6-4` from the
+species above it. Every token still exists on the page, so recall scores it 99.5%
+and a recall-only benchmark would have bought docling on the strength of it.
+
+PDFKit's reading order holds on all four pages — the concern that it emits text
+in arbitrary PDF object order did not reproduce on this corpus. One row in 43
+mispairs on p32 (`bermudagrass, water (knotgrass)` reads `4` where the file says
+`1.2`), so it is 97.7%, not perfect.
+
+**Where this metric does not apply:** blank forms. On IRS Schedule F it scores
+PDFKit at 38%, but the "numbers" it is scoring are form line numbers (`1a`, `1b`,
+`5c`) and leader dots — an empty form has no label→value pairing to preserve.
+Form mode reads AcroForm widgets rather than text anyway. Those rows are
+discarded, not reported.
+
 ## Four things this settles
 
 **1. Docling really does fix the rate table.** 4.8% → 99.5% on the identical
@@ -108,10 +151,21 @@ penalty.
 ## Recommendation
 
 1. **Re-open "OCR every page, always" for values.** It is the whole rate-table
-   failure and it costs one line. Keep OCR for geometry, confidence, and pages
-   with no text layer.
-2. **Do not swap the OCR tier to docling.** NRCS 100% → 37.5% and 30× the wall
-   clock.
+   failure and it costs one line. The text layer is the only one of the three
+   that gets both the tokens *and* the rows right. Keep OCR for geometry,
+   confidence, and pages with no text layer.
+2. **Do not swap the OCR tier to docling.** NRCS 100% → 37.5% on recall, 76.4%
+   row integrity on the page it was meant to fix, and 30× the wall clock.
 3. **Keep docling as a narrow, opt-in tool** for the case nothing else covers: a
    page with no text layer *and* a dense table. If that case gets built, point
-   its OCR at something other than RapidOCR first.
+   its OCR at something other than RapidOCR first — and score it on row
+   integrity, not recall.
+4. **Score every future OCR change on both metrics.** Recall alone rates docling
+   99.5% on a page where it misattributes a quarter of the rates. `ocr_bench.py`
+   should grow both columns before the next engine is judged.
+
+## Scope of this spike
+
+Four pages of one corpus, one machine. Docling row integrity was measured on p34
+only — the flagship failure — not on the other three. Nothing in `Sources/` is
+touched and no decision is taken here; `context/` remains the source of truth.
