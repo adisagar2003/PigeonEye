@@ -1,6 +1,8 @@
+import Agent
+import AppKit
 import SwiftUI
 
-// The first-run explainer. Three cards, stepped through by hand, then never
+// The first-run explainer. Four cards, stepped through by hand, then never
 // shown again. Every claim here is one F1 actually keeps — there is no Gate
 // layer in the package, so "nothing leaves this machine" is true by
 // construction rather than by promise (context/features/01-read-it-locally.md
@@ -11,7 +13,55 @@ public struct OnboardingScreen: View {
         let kicker: String
         let title: String
         let detail: String
+        /// The one card that carries a control rather than only prose. Named on
+        /// the card so adding a fifth cannot silently move the picker onto it.
+        var picksTier = false
     }
+
+    /// Which tier does the reasoning — `architecture.md` §6, Boundary C, and the
+    /// row in §5 that already decided "cloud for the demo, local where hardware
+    /// allows". Recorded at first run and read when F5 ships the egress
+    /// function; **today it sends nothing either way**, because there is no Gate
+    /// layer in the package — `scripts/layers.sh` still reports "no egress
+    /// outside Gate", and this file is not allowed to be the exception.
+    ///
+    /// ponytail: lives in UI because UI is the only layer that has an opinion
+    /// about it. It moves down to `Contracts` the moment the Gate reads it.
+    public enum Tier: String, CaseIterable, Identifiable, Sendable {
+        case openAI
+        case local
+
+        public var id: String { rawValue }
+
+        /// The default, per §5: the cloud leg is what the demo runs on.
+        public static let preferred = Tier.openAI
+
+        public var title: String {
+            switch self {
+            case .openAI: "OpenAI"
+            case .local: "On this Mac"
+            }
+        }
+
+        public var detail: String {
+            switch self {
+            case .openAI:
+                "Crops and transcript text leave the machine, and only inside the "
+                    + "consent you give when you import a document."
+            case .local:
+                "Apple's on-device model. Nothing leaves, and there is no key to supply."
+            }
+        }
+    }
+
+    /// The one branch here worth a test: only the local tier can want a
+    /// download, and only when macOS has not put the model on this machine yet.
+    /// Taking `modelReady` as an argument keeps it decidable without a
+    /// particular Mac's Apple Intelligence state deciding the test result.
+    public static func needsDownload(_ tier: Tier, modelReady: Bool) -> Bool {
+        tier == .local && !modelReady
+    }
+
 
     static let cards: [Card] = [
         .init(kicker: "What it is",
@@ -37,6 +87,16 @@ public struct OnboardingScreen: View {
                       transcript, where it sits. A missing page is never quietly \
                       skipped.
                       """),
+        .init(kicker: "Which model",
+              title: "OpenAI reads it, unless you say otherwise",
+              detail: """
+                      When a page is too unclear to settle here, the question \
+                      goes to OpenAI — crops and transcript text, only under the \
+                      consent you give at import. Pick On this Mac and nothing \
+                      leaves at all. Either way this build sends nothing yet: \
+                      the card before this one is still true.
+                      """,
+              picksTier: true),
     ]
 
     /// Clamped, so the first Back and the last Next cannot walk off the deck.
@@ -47,6 +107,16 @@ public struct OnboardingScreen: View {
     }
 
     @State private var index = 0
+    /// Same store and same reason as `onboardingSeen` in `ReaderScreen`: a
+    /// SwiftPM executable has no bundle, so this lands in
+    /// `~/Library/Preferences/PigeonEye.plist` and survives a rebuild.
+    @AppStorage("readingTier") private var tier = Tier.preferred
+    /// Asked once here and again every time the app comes back to the front.
+    /// "Download now" sends the user to System Settings, so the trip back is
+    /// exactly when the answer has changed — a value read straight in `body`
+    /// would leave the button offering a download that has already happened.
+    @State private var localModelReady = localModelAvailable()
+    @Environment(\.scenePhase) private var scenePhase
     private let done: () -> Void
 
     public init(done: @escaping () -> Void) { self.done = done }
@@ -66,6 +136,9 @@ public struct OnboardingScreen: View {
             .blueprint()
         }
         .foregroundStyle(Ink.text)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { localModelReady = localModelAvailable() }
+        }
     }
 
     private var card: some View {
@@ -76,9 +149,54 @@ public struct OnboardingScreen: View {
             Text(card.detail)
                 .font(.body(13.5)).foregroundStyle(Ink.neutral700)
                 .fixedSize(horizontal: false, vertical: true)
+            if card.picksTier { picker.padding(.top, 6) }
         }
         .frame(maxWidth: .infinity, minHeight: 190, alignment: .topLeading)
         .padding(28)
+    }
+
+    /// A plain menu `Picker`. The rest of this app draws its own controls
+    /// because the design has no stock equivalent; a dropdown does, and the
+    /// stock one already handles keyboard, VoiceOver and the menu placement.
+    private var picker: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Model").kicker(11, tracking: 1.1)
+
+            Picker("Model", selection: $tier) {
+                ForEach(Tier.allCases) { option in Text(option.title).tag(option) }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .tint(Ink.accent)
+            .frame(width: 190)
+
+            Text(tier.detail)
+                .font(.body(12)).foregroundStyle(Ink.neutral600)
+                .fixedSize(horizontal: false, vertical: true)
+
+            // Only when macOS has not put the on-device model here yet. Offering
+            // it unconditionally would be this screen's first false statement.
+            if Self.needsDownload(tier, modelReady: localModelReady) {
+                Button(action: openSettings) {
+                    Text("Download now")
+                        .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .foregroundStyle(Ink.accent700)
+                        .overlay(Rectangle().stroke(Ink.accent400, lineWidth: 1))
+                }
+                .buttonStyle(.flat)
+                .help("Apple Intelligence downloads the model. Opens System Settings.")
+            }
+        }
+    }
+
+    /// ponytail: the top of System Settings, not the Apple Intelligence pane.
+    /// The per-pane URL is an undocumented bundle id that has moved between
+    /// releases, and landing on the wrong pane is worse than landing on the
+    /// front page. Deep-link it when there is a documented anchor to use.
+    private func openSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:") else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private var controls: some View {

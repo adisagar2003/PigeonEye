@@ -20,6 +20,9 @@ check() {
 check "Vision only in Tools"      'import Vision'      'Tools'
 check "PDFKit only in Tools"      'import PDFKit'      'Tools'
 check "SwiftUI only in UI"        'import SwiftUI'     'UI\|PigeonEye'
+# The third framework of the same class as Vision and PDFKit, and the one this
+# check was missing when the model picker first put it in the view.
+check "FoundationModels in Agent" 'import FoundationModels' 'Agent'
 check "no egress outside Gate"    'URLSession\|http'   'Gate'
 
 # §1:42 — "No other root-level file gets that grace." A file's layer is its
