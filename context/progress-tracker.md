@@ -158,6 +158,71 @@ The old stage numbers survive where they are load-bearing: `coding-standards.md`
 | **109 rows do not fit on one page** | A 105-field form paginates to more than one PDF page. Asserted with `PDFDocument.pageCount`, because a paginator that draws one frame and drops the overflow produces a valid, complete-looking, truncated file |
 | **The JSON is byte-stable** | `.sortedKeys` — two exports of one document diff clean, which is the property that makes an export worth keeping |
 
+### F3 slice 3.4 — what reading 3.1's own output measured
+
+Every document in `assets/` through the shipping path, every finding dumped to a
+TSV (`Tests/PigeonEyeTests/CorpusDumpTests.swift`, gated on `CORPUS_DUMP` so it
+never runs in an ordinary `swift test`). 12 PDFs and 18 scans, **8,421
+findings**. Nothing here was visible from reading the code.
+
+**The registration validator was 88% wrong, and said *checked* every time.**
+
+| | before | after |
+|---|---|---|
+| Distinct values labelled `EPA reg. no.` across the corpus | **131** | **7** |
+| …rows | 336 | 61 |
+| On IRS P17, a tax guide with no EPA anywhere in it | 42 | 0 |
+
+The seven that survive are the seven the corpus contains: `524-529`, `524-549`,
+`524-522`, `7969-186`, `7969-242`, `35915-4`, `66330-424`. What went is phone
+numbers (`1-800-424-9300`, `314-694-4000`), IRS notice and revenue-procedure
+numbers (`2021-48`, `2010-33`), OMB numbers (`1545-0074`), ZIP+4
+(`20250-9410`) and EPA establishment numbers (`2008-04-088-0099`). Each one
+carried the *checked* badge, because passing the shape is exactly what checked
+claimed — **a wrong answer wearing the highest-trust signal in §12**, which is
+the most dangerous shape a defect can take in this product.
+
+`\b\d{3,5}-\d{1,5}\b` cannot be tightened into precision; a five-digit-dash-
+five-digit number is a common string. The precision lives in the words on the
+line, and every genuine occurrence in the corpus sits next to "EPA Reg. No." or
+"EPA Registration Number". Hence `Format.cue` — and it gates the *name*, never
+the value.
+
+**Half the findings were the same fact said twice.**
+
+| Collision | rows |
+|---|---|
+| `Amount` (validator) and `moneyAmount` (detector), same value, same region | 4,030 → **2,076** |
+| `Application rate` and `measurement` | 103 pairs on the EPA labels alone |
+| `Date` and `calendarEvent` | 30 pairs |
+
+On 120 pages of IRS P17 the validator found 693 amounts and the detector found
+695 of the same ones. Merging on value + region, validator wins.
+
+**80 of 114 `calendarEvent` matches contained no date.** `1.6-2.4`, `1.6 to 3.2`
+and `0.07 - 0.10` off the EPA rate tables; bare `Saturday` and `Sunday` off the
+tax guide. They landed in the one group a reader opens to find a deadline.
+
+**The whole corpus, before and after:**
+
+| | before | after |
+|---|---|---|
+| Findings | 8,421 | **5,794** (−31.2%) |
+| Rows carrying *checked* | 4,405 | 4,130 |
+| Index rows (distinct values) | — | **2,412** |
+
+**And the reason the index exists at all:**
+
+| Document | pages read | findings | index rows |
+|---|---|---|---|
+| IRS P17 federal income tax | 120 | 1,279 | **512** |
+| IRS P225 farmer's tax guide | 120 | 1,593 | 539 |
+| IRS P946 depreciating property | 120 | 1,593 | 732 |
+| `000524-00529` Roundup PRO | 45 | 301 | 156 |
+
+P17 was **2,064 findings before this slice** — 17 a page. A per-page list is not
+an answer to "when is this due", and no amount of scrolling makes it one.
+
 ### Dry run over all of `assets/` — OCR loses the rate tables
 
 Every document read through the shipping path (150 dpi render → Vision): 9 PDFs
