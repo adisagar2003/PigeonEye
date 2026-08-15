@@ -1,5 +1,5 @@
+import Agent
 import AppKit
-import FoundationModels
 import SwiftUI
 
 // The first-run explainer. Four cards, stepped through by hand, then never
@@ -62,12 +62,6 @@ public struct OnboardingScreen: View {
         tier == .local && !modelReady
     }
 
-    /// The only framework read on this screen outside SwiftUI, so it stays
-    /// behind one name. A property read, not a download or a session.
-    static var localModelReady: Bool {
-        if case .available = SystemLanguageModel.default.availability { return true }
-        return false
-    }
 
     static let cards: [Card] = [
         .init(kicker: "What it is",
@@ -117,6 +111,12 @@ public struct OnboardingScreen: View {
     /// SwiftPM executable has no bundle, so this lands in
     /// `~/Library/Preferences/PigeonEye.plist` and survives a rebuild.
     @AppStorage("readingTier") private var tier = Tier.preferred
+    /// Asked once here and again every time the app comes back to the front.
+    /// "Download now" sends the user to System Settings, so the trip back is
+    /// exactly when the answer has changed — a value read straight in `body`
+    /// would leave the button offering a download that has already happened.
+    @State private var localModelReady = localModelAvailable()
+    @Environment(\.scenePhase) private var scenePhase
     private let done: () -> Void
 
     public init(done: @escaping () -> Void) { self.done = done }
@@ -136,6 +136,9 @@ public struct OnboardingScreen: View {
             .blueprint()
         }
         .foregroundStyle(Ink.text)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { localModelReady = localModelAvailable() }
+        }
     }
 
     private var card: some View {
@@ -173,7 +176,7 @@ public struct OnboardingScreen: View {
 
             // Only when macOS has not put the on-device model here yet. Offering
             // it unconditionally would be this screen's first false statement.
-            if Self.needsDownload(tier, modelReady: Self.localModelReady) {
+            if Self.needsDownload(tier, modelReady: localModelReady) {
                 Button(action: openSettings) {
                     Text("Download now")
                         .font(.heading(12.5)).tracking(0.9).textCase(.uppercase)
