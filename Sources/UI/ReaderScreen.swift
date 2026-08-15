@@ -444,11 +444,12 @@ public struct ReaderScreen: View {
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text("p\(field.page)")
                                     .font(.mono(11)).foregroundStyle(Ink.neutral600)
+                                Chevron()
                             }
                             .padding(.vertical, 5).padding(.horizontal, 8)
                             .background(model.selectedField == field ? Ink.accent100 : Color.clear)
                         }
-                        .buttonStyle(.flat)
+                        .buttonStyle(.row)
                     }
                 }
             }
@@ -503,6 +504,7 @@ public struct ReaderScreen: View {
                                     } else {
                                         UnscoredMark()
                                     }
+                                    Chevron()
                                 }
                                 Text(found.value ?? "—")
                                     .font(.mono(13)).foregroundStyle(Ink.text)
@@ -516,7 +518,7 @@ public struct ReaderScreen: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .background(model.selectedFinding?.id == found.id ? Ink.accent100 : Color.clear)
                         }
-                        .buttonStyle(.flat)
+                        .buttonStyle(.row)
                     }
                 }
                 .blueprint(stroke: Ink.divider)
