@@ -151,3 +151,74 @@ verifies. `Findings.swift` shrinks from detector-as-product to validator.
 
 Nothing gets built until Q1 and Q2 have answers. First slice once they do:
 document in → router picks a path → one page rendered in the shell.
+
+---
+
+## 6. The stack
+
+**2026-08-20.** Q1 is answered: all three desktops, one codebase. Offline-first
+is the product (`project-overview.md` §3), so every tier below runs locally and
+the network is an exception the user authorises.
+
+| Layer | Pick | Replaces |
+|---|---|---|
+| Shell | **Tauri** — Rust wrapper, ~200 LOC of `#[tauri::command]` sidecar shims, no domain logic | — (D3) |
+| UI | **Next.js** — the existing `web/` | `Sources/UI/*` (~2500 LOC, SwiftUI) |
+| Core | **Python sidecar**, one process, `eval/`'s venv | — (D4) |
+| Parse | **Docling** (MIT) — PDF/DOCX/XLSX/images, text layer → layout → reading order → table structure → OCR, one call | `Tools/Raster.swift` (PDFKit), `Tools/OCR.swift` (Vision), and D5's router |
+| OCR fallback | **Tesseract**, behind Docling's flag | (D2 survives, demoted to a leaf) |
+| Local model | **Ollama** + a Qwen3/Llama-class model, schema-constrained JSON out | `Agent/LocalModel.swift` (FoundationModels, and its 4096-token window) |
+| Extraction | schema-constrained model output, spans as citation | `Tools/Findings.swift` (DataDetection) shrinks to a validator (D6) |
+| Export | reportlab / fpdf | `Tools/Export.swift` (CoreGraphics/CoreText) |
+| Cloud, consented | the existing `Gate` — one file, one socket | ported as-is |
+| Packaging | Tauri bundles the sidecar; Ollama is a prerequisite install | — |
+
+**Kept from this repo:** `Contracts` (I1–I13 and the §12 composite — ported with
+its tests, D7), `Gate`, `eval/`, `assets/`.
+
+**Deleted:** every Apple framework in §1's table. Vision, PDFKit,
+FoundationModels, DataDetection, CoreGraphics/CoreText.
+
+### 6.1 Why Docling and not a better OCR engine
+
+`progress-tracker.md`, flagship EPA label page 34: **186 numbers in the file, 1
+survives OCR** — the page number. The tracker already ruled out every
+recogniser-level cause (not the table API, not the pixels, not DPI, not caught
+by the confidence gate, since an unemitted line has no bbox). *"Whole-page
+layout analysis is what drops them."*
+
+So the defect is layout, not character recognition, and swapping recognisers
+moves CER by single digits and 186→1 not at all. Docling is a layout-aware
+parser, which is the tier the failure is actually in. It also collapses D5's
+router, `Raster`, `OCR` and the `.docx`/`.xlsx` path into one dependency.
+
+The cloud parsers on the market — Textract, Google Document AI, Azure, ABBYY,
+LlamaParse — are disqualified before accuracy is discussed: offline-first.
+
+### 6.2 Two things to measure, not assume
+
+| # | Measurement | What it decides |
+|---|---|---|
+| M1 | Docling on page 34 — digits recovered vs `pdftotext` | 186 back → the port is a shell swap. 1 back → the problem is not tooling and §6 needs re-planning |
+| M2 | Does Docling's export carry per-element bboxes? | **I2** (quote is a substring of the transcript) and click-to-jump both need positions. No positions → §5's "model proposes, span verifies" has nothing to verify against |
+
+**§12 needs recalibrating.** The confidence composite was fitted to Vision's
+confidence numbers. Carried over unchanged onto a different parser's scores, it
+is a ring that lies.
+
+### 6.3 Order
+
+1. M1 — the Docling spike. Everything below assumes it wins.
+2. Port `Contracts` **with its test suite** (D7). Nothing after this is checkable
+   until the invariants are.
+3. Router + Docling behind a CLI: `doc-read file.pdf --json`, keeping the shape
+   `scripts/cli-contract.sh` asserts — `eval/` already parses it, so `eval/`
+   becomes the port's regression suite for free.
+4. `Findings` as validator (D6).
+5. `Gate`, then `Export`.
+6. `web/` against the CLI over localhost — one FastAPI file, three routes: open,
+   read, ask.
+7. Tauri wrapper.
+
+Steps 1–6 already run on macOS, Linux and Windows through a browser. Step 7 is
+packaging, not portability.
