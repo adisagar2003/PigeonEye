@@ -174,9 +174,51 @@ feature has a spec under `context/features/`. One source of truth, per
 | F7 | Inspector mode | — | partial (step log shipped in F1; the egress ledger shipped in F9) |
 | F8 | Export | — | **complete** — 8.1, built out of order (see Current phase) |
 | F9 | Ask about this page | [`features/09-ask-about-this-page.md`](features/09-ask-about-this-page.md) | **complete** — 9.1, built out of order (see Current phase) |
+| F10 | Tauri shell | [`features/10-migrate-to-tauri.md`](features/10-migrate-to-tauri.md) | **in progress** — 10.1 complete (window renders), 10.2 next |
 
 The old stage numbers survive where they are load-bearing: `coding-standards.md`
 §4 maps stages to the tests that must fail first, and F1 covers stage 1.
+
+### F10 slice 10.1 — a second app root, and what the Rust research settled
+
+`app/` now exists beside `Package.swift`: a Tauri 2.11 shell that opens a window
+and holds nothing. Epic [#25](https://github.com/adisagar2003/PigeonEye/issues/25).
+**No line of `Sources/` moved**, which is the only reason this was cheap enough
+to land as one commit.
+
+Three things this row settled that later rows should not re-litigate:
+
+1. **The Rust PDF question is answered, and it is Pdfium.** `pdfium-render` gives
+   typed form fields, `PdfPageAnnotationCommon::bounds()` for the rect, page
+   index from iterating pages, and rasterise-with-clipping — so
+   `listFormFields`, `cropRegion` and the raster path collapse onto **one**
+   dependency where Swift needed three. The `lopdf`-based crates do not document
+   widget rects, and no rect means no crop and no bbox to anchor a quote to.
+   That rules them out on **I2** grounds, not on taste.
+2. **"0 dependencies" is now on a clock.** Pdfium is a native binary the crate
+   does not bundle, ~10 MB per platform. The README badge stops being true the
+   moment slice 10.2 lands. Decide whether it is replaced or dropped *before*
+   that commit, not during a release.
+3. **The OCR risk was already retired and nobody noticed.** The three-way
+   benchmark below put Tesseract within **1 point of Apple Vision on CER**
+   (27.8% vs 26.9%). The number that actually threatens this migration is
+   **BER — 31.6% vs 20.1%**, whole words mangled, and a mangled word is what a
+   quote is made of. Phase 1 holds BER, not CER.
+
+**Newly open: XFA.** Pdfium's XFA support is a compile-time flag absent from
+standard prebuilt binaries, and some IRS/USCIS forms are dynamic XFA rather than
+AcroForm. PDFKit handles them poorly too, so this is plausibly an existing hole
+in v1.0.0 rather than a regression — but `assets/gov-forms/` has not been checked
+for one, and the current build's behaviour on an XFA file is unknown. Cheaper to
+learn from the corpus than from a reader with a filing deadline.
+
+**`scripts/layers.sh` grew a sixth check** — `app/src-tauri/src` holds no
+`#[tauri::command]` and no socket. Both are true today; the check is what stops
+them quietly stopping being true. The layer arm proper waits for slice 10.2,
+because until then there are no layers in `app/` to enforce.
+
+**Not verified:** Windows and Linux. There is no machine and no CI, so
+"cross-platform" is an intention in this row, not a measurement.
 
 ---
 

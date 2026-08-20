@@ -25,6 +25,23 @@ check "SwiftUI only in UI"        'import SwiftUI'     'UI\|PigeonEye'
 check "FoundationModels in Agent" 'import FoundationModels' 'Agent'
 check "no egress outside Gate"    'URLSession\|http'   'Gate'
 
+# The Tauri shell (F10 slice 10.1). It has no layers yet — one main.rs and two
+# static files — so there is exactly one rule worth making mechanical now: it
+# exposes no commands to the webview and holds no socket. Both are true today;
+# these two lines are what stop them quietly stopping being true. The layer arm
+# proper lands with the Rust tool layer in slice 10.2.
+if [ -d app/src-tauri/src ]; then
+    hits=$(grep -rl 'reqwest\|ureq\|hyper\|TcpStream\|#\[tauri::command\]' \
+        app/src-tauri/src || true)
+    if [ -n "$hits" ]; then
+        echo "FAIL  Tauri shell exposes no commands and holds no socket"
+        echo "$hits" | sed 's/^/        /'
+        fail=1
+    else
+        echo "ok    Tauri shell exposes no commands and holds no socket"
+    fi
+fi
+
 # §1:42 — "No other root-level file gets that grace." A file's layer is its
 # directory, so a file at the root has no layer and no import rule. The root is
 # therefore an allowlist: entry-point docs, the manifest, and nothing else.
